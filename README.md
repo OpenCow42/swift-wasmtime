@@ -29,9 +29,11 @@ source target.
 - Swift 6 thread-safe surface: `EngineOptions` for sendable engine
   configuration, `WasiOptions` for sendable WASI configuration, and
   `WasmtimeRuntime` for actor-serialized store execution.
-- Config knobs for component model, SIMD/relaxed SIMD, compilation strategy,
-  Cranelift optimization/flags, target triples, trap handling, debug info,
-  parallel compilation, linear-memory reservation/guard sizing, fuel
+- Config knobs for component model, core Wasm proposals, SIMD/relaxed SIMD,
+  compilation strategy, Cranelift optimization/flags/debug verification/NaN
+  canonicalization, profiling strategy, target triples, trap handling, debug
+  info, native unwind info, macOS Mach-port handling, parallel compilation,
+  linear-memory reservation/guard sizing and copy-on-write initialization, fuel
   consumption, epoch interruption, and maximum Wasm stack size.
 - Resource-control APIs for fuel, epoch deadlines, epoch interruption callbacks,
   store resource limits, explicit store GC, and engine epoch increments, exposed
@@ -55,11 +57,13 @@ source target.
   safe copy-based memory reads/writes, memory growth, and actor-isolated
   `WasmtimeRuntime` memory helpers.
 - Numeric scalar global support through `GlobalType`, `Global`, exported global
-  lookup, immutable and mutable global reads/writes, and linker-defined globals.
+  lookup, immutable and mutable global reads/writes, linker-defined globals, and
+  actor-isolated `WasmtimeRuntime` global helpers.
 - Table support through `TableType`, `Table`, exported table lookup, table size,
   table growth, linker-defined tables, function references, and null
-  `funcref`/`externref` elements. Arbitrary non-null host `externref` payloads
-  are intentionally deferred until broader reference value modeling exists.
+  `funcref`/`externref` elements, including actor-isolated `WasmtimeRuntime`
+  table helpers. Arbitrary non-null host `externref` payloads are intentionally
+  deferred until broader reference value modeling exists.
 - General extern lookup through `Instance.export(named:)`,
   `Instance.export(at:)`, `Instance.exports()`, `Extern`, and
   `Linker.get(store:module:name:)`. Functions, globals, tables, and memories

@@ -13,6 +13,7 @@ import Testing
     acceptsSendable(EpochDeadlineAction.continue(ticksBeyondCurrent: 1))
     acceptsSendable(CompilationStrategy.automatic)
     acceptsSendable(CraneliftOptimizationLevel.speed)
+    acceptsSendable(ProfilingStrategy.none)
     acceptsSendable(try MemoryType(minimumPages: 0))
     acceptsSendable(try GlobalType(content: .i32))
     acceptsSendable(try TableType(minimumElements: 0))
@@ -27,6 +28,7 @@ import Testing
     acceptsSendable(RuntimeHostFunction(module: "host", name: "answer", results: [.i32]) { _ in [.i32(42)] })
     acceptsSendable(WasiOptions())
     acceptsSendable(WasiPreopenedDirectory(hostPath: "/", guestPath: "/host"))
+    acceptsSendable(RuntimeTableElement.functionReference)
     acceptsSendable(Trap(message: "trap", code: nil))
     acceptsSendable(TrapCode.unreachableCodeReached)
     acceptsSendable(WasmFrame(functionIndex: 0, functionOffset: 1, moduleOffset: 2))
@@ -239,12 +241,31 @@ import Testing
     config.isSIMDEnabled = true
     config.isRelaxedSIMDEnabled = true
     config.isRelaxedSIMDDeterministic = true
+    config.isSharedMemoryEnabled = true
+    config.isTailCallEnabled = true
+    config.isReferenceTypesEnabled = true
+    config.isFunctionReferencesEnabled = true
+    config.isWasmGCEnabled = true
+    config.isGCSupportEnabled = true
+    config.isBulkMemoryEnabled = true
+    config.isMultiValueEnabled = true
+    config.isMultiMemoryEnabled = true
+    config.isMemory64Enabled = true
+    config.isWideArithmeticEnabled = true
+    config.areExceptionsEnabled = true
+    config.areCustomPageSizesEnabled = true
     config.debugInfo = true
     config.parallelCompilation = false
+    config.nativeUnwindInfo = true
+    config.usesMachPortsOnMacOS = true
+    config.usesMemoryInitCopyOnWrite = true
     config.consumesFuel = true
     config.usesEpochInterruption = true
     config.memoryMayMove = true
     config.signalsBasedTraps = true
+    config.isCraneliftDebugVerifierEnabled = true
+    config.isCraneliftNaNCanonicalizationEnabled = true
+    config.profiler = .none
     config.setMemoryReservation(1 << 32)
     config.setMemoryGuardSize(1 << 16)
     config.setMemoryReservationForGrowth(1 << 20)
@@ -260,6 +281,10 @@ import Testing
     #expect(CraneliftOptimizationLevel.none.rawValue == wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_NONE.rawValue))
     #expect(CraneliftOptimizationLevel.speed.rawValue == wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED.rawValue))
     #expect(CraneliftOptimizationLevel.speedAndSize.rawValue == wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED_AND_SIZE.rawValue))
+    #expect(ProfilingStrategy.none.rawValue == wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_NONE.rawValue))
+    #expect(ProfilingStrategy.jitdump.rawValue == wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_JITDUMP.rawValue))
+    #expect(ProfilingStrategy.vtune.rawValue == wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_VTUNE.rawValue))
+    #expect(ProfilingStrategy.perfmap.rawValue == wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_PERFMAP.rawValue))
 
     _ = try Engine(config: config)
 }
@@ -270,12 +295,31 @@ import Testing
         isSIMDEnabled: true,
         isRelaxedSIMDEnabled: true,
         isRelaxedSIMDDeterministic: true,
+        isSharedMemoryEnabled: true,
+        isTailCallEnabled: true,
+        isReferenceTypesEnabled: true,
+        isFunctionReferencesEnabled: true,
+        isWasmGCEnabled: true,
+        isGCSupportEnabled: true,
+        isBulkMemoryEnabled: true,
+        isMultiValueEnabled: true,
+        isMultiMemoryEnabled: true,
+        isMemory64Enabled: true,
+        isWideArithmeticEnabled: true,
+        areExceptionsEnabled: true,
+        areCustomPageSizesEnabled: true,
         strategy: .cranelift,
         craneliftOptimizationLevel: .speedAndSize,
+        isCraneliftDebugVerifierEnabled: true,
+        isCraneliftNaNCanonicalizationEnabled: true,
+        profiler: .none,
         memoryMayMove: true,
         signalsBasedTraps: true,
         debugInfo: true,
         parallelCompilation: false,
+        nativeUnwindInfo: true,
+        usesMachPortsOnMacOS: true,
+        usesMemoryInitCopyOnWrite: true,
         target: nativeTargetTriple,
         memoryReservation: 1 << 32,
         memoryGuardSize: 1 << 16,
@@ -292,6 +336,25 @@ import Testing
     #expect(options.interruption.consumesFuel)
     #expect(options.interruption.usesEpochInterruption)
     #expect(options.interruption.maxWasmStack == 1 << 20)
+    #expect(options.isSharedMemoryEnabled)
+    #expect(options.isTailCallEnabled)
+    #expect(options.isReferenceTypesEnabled)
+    #expect(options.isFunctionReferencesEnabled)
+    #expect(options.isWasmGCEnabled)
+    #expect(options.isGCSupportEnabled)
+    #expect(options.isBulkMemoryEnabled)
+    #expect(options.isMultiValueEnabled)
+    #expect(options.isMultiMemoryEnabled)
+    #expect(options.isMemory64Enabled)
+    #expect(options.isWideArithmeticEnabled)
+    #expect(options.areExceptionsEnabled)
+    #expect(options.areCustomPageSizesEnabled)
+    #expect(options.isCraneliftDebugVerifierEnabled)
+    #expect(options.isCraneliftNaNCanonicalizationEnabled)
+    #expect(options.profiler == .none)
+    #expect(options.nativeUnwindInfo)
+    #expect(options.usesMachPortsOnMacOS)
+    #expect(options.usesMemoryInitCopyOnWrite)
 
     options.enableCraneliftFlag(nativeSIMDFlag)
     options.setCraneliftFlag(nativeSIMDFlag, to: "true")
@@ -1208,6 +1271,104 @@ import Testing
         Issue.record("expected wrong export kind")
     } catch let error as WasmtimeError {
         #expect(error.description.contains("expected memory"))
+    }
+}
+
+@Test func runtimeActorManagesExportedGlobalsAndTables() async throws {
+    let runtime = try WasmtimeRuntime()
+    let instance = try await runtime.instantiate(
+        wat: """
+        (module
+          (global (export "counter") (mut i32) (i32.const 4))
+          (global (export "answer") i64 (i64.const 42))
+          (table (export "table") 2 4 funcref)
+          (table (export "externs") 1 2 externref)
+          (func (export "answer_func") (result i32)
+            i32.const 42)
+          (func (export "read_counter") (result i32)
+            global.get 0)
+          (memory (export "memory") 1)
+          (func (export "not-global")))
+        """
+    )
+
+    let counterType = try await runtime.globalType(named: "counter", in: instance)
+    #expect(counterType.content == .i32)
+    #expect(counterType.isMutable)
+    #expect(try await runtime.globalValue(named: "counter", in: instance) == .i32(4))
+
+    try await runtime.setGlobal(named: "counter", in: instance, to: .i32(9))
+    #expect(try await runtime.globalValue(named: "counter", in: instance) == .i32(9))
+    #expect(try await runtime.call("read_counter", in: instance) == [.i32(9)])
+
+    let answerType = try await runtime.globalType(named: "answer", in: instance)
+    #expect(answerType.content == .i64)
+    #expect(!answerType.isMutable)
+    #expect(try await runtime.globalValue(named: "answer", in: instance) == .i64(42))
+
+    do {
+        try await runtime.setGlobal(named: "answer", in: instance, to: .i64(7))
+        Issue.record("expected immutable global set to fail")
+    } catch is WasmtimeError {
+    }
+    do {
+        _ = try await runtime.globalValue(named: "not-global", in: instance)
+        Issue.record("expected wrong export kind")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected global"))
+    }
+    do {
+        _ = try await runtime.globalValue(named: "counter", in: RuntimeInstanceID(rawValue: 999))
+        Issue.record("expected missing runtime instance")
+    } catch let error as WasmtimeError {
+        #expect(error == .missingRuntimeInstance(RuntimeInstanceID(rawValue: 999)))
+    }
+
+    let tableType = try await runtime.tableType(in: instance)
+    #expect(tableType.element == .functionReference)
+    #expect(tableType.minimumElements == 2)
+    #expect(tableType.maximumElements == 4)
+    #expect(try await runtime.tableSize(in: instance) == 2)
+    #expect(try await runtime.tableElement(in: instance, index: 0) == .nullFunctionReference)
+    #expect(try await runtime.tableElement(in: instance, index: 9) == nil)
+
+    try await runtime.setTableElement(in: instance, index: 0, toFunction: "answer_func")
+    #expect(try await runtime.tableElement(in: instance, index: 0) == .functionReference)
+    try await runtime.setTableElementToNull(in: instance, index: 0)
+    #expect(try await runtime.tableElement(in: instance, index: 0) == .nullFunctionReference)
+    #expect(try await runtime.growTable(in: instance, by: 1) == 2)
+    #expect(try await runtime.tableSize(in: instance) == 3)
+    #expect(try await runtime.tableElement(in: instance, index: 2) == .nullFunctionReference)
+
+    let externsType = try await runtime.tableType(named: "externs", in: instance)
+    #expect(externsType.element == .externalReference)
+    #expect(try await runtime.tableSize(named: "externs", in: instance) == 1)
+    #expect(try await runtime.tableElement(named: "externs", in: instance, index: 0) == .nullExternalReference)
+    try await runtime.setTableElementToNull(named: "externs", in: instance, index: 0)
+    #expect(try await runtime.growTable(named: "externs", in: instance, by: 1) == 1)
+    #expect(try await runtime.tableSize(named: "externs", in: instance) == 2)
+
+    #expect(RuntimeTableElement.nullFunctionReference.description == "null funcref")
+    #expect(RuntimeTableElement.functionReference.description == "funcref")
+    #expect(RuntimeTableElement.nullExternalReference.description == "null externref")
+
+    do {
+        _ = try await runtime.tableSize(named: "memory", in: instance)
+        Issue.record("expected wrong export kind")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected table"))
+    }
+    do {
+        _ = try await runtime.tableSize(named: "missing", in: instance)
+        Issue.record("expected missing table export")
+    } catch let error as WasmtimeError {
+        #expect(error == .missingExport("missing"))
+    }
+    do {
+        try await runtime.setTableElement(in: instance, index: 0, toFunction: "missing")
+        Issue.record("expected missing function export")
+    } catch let error as WasmtimeError {
+        #expect(error == .missingExport("missing"))
     }
 }
 

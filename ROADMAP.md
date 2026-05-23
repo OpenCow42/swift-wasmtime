@@ -83,7 +83,6 @@ Numeric scalar globals are covered by `GlobalType`, `Global`,
 Remaining global-related gaps:
 
 - Reference-typed global values, pending broader reference value modeling.
-- Actor-isolated global get/set helpers on `WasmtimeRuntime`.
 
 ### Tables
 
@@ -97,7 +96,6 @@ Remaining table-related gaps:
 
 - Non-null host `externref` payload creation and inspection.
 - Broader GC/reference table element kinds beyond `funcref` and `externref`.
-- Actor-isolated table helpers on `WasmtimeRuntime`.
 
 ### Tags And Exceptions
 
@@ -301,29 +299,11 @@ The current config surface is useful but incomplete. Missing config knobs:
 
 - `wasmtime_config_cache_config_load`
 - `wasmtime_config_wasm_threads_set`
-- `wasmtime_config_shared_memory_set`
-- `wasmtime_config_wasm_tail_call_set`
-- `wasmtime_config_wasm_reference_types_set`
-- `wasmtime_config_wasm_function_references_set`
-- `wasmtime_config_wasm_gc_set`
-- `wasmtime_config_gc_support_set`
-- `wasmtime_config_wasm_bulk_memory_set`
-- `wasmtime_config_wasm_multi_value_set`
-- `wasmtime_config_wasm_multi_memory_set`
-- `wasmtime_config_wasm_memory64_set`
-- `wasmtime_config_wasm_wide_arithmetic_set`
-- `wasmtime_config_wasm_exceptions_set`
-- `wasmtime_config_wasm_custom_page_sizes_set`
 - `wasmtime_config_wasm_stack_switching_set`
-- `wasmtime_config_cranelift_debug_verifier_set`
-- `wasmtime_config_cranelift_nan_canonicalization_set`
-- `wasmtime_config_profiler_set`
-- `wasmtime_config_native_unwind_info_set`
-- `wasmtime_config_macos_use_mach_ports_set`
-- `wasmtime_config_memory_init_cow_set`
 
-Swift should add these through both `Config` and `EngineOptions` when they are
-simple value settings.
+The remaining entries are intentionally deferred because cache loading returns
+errors and needs path/default-cache semantics, while Wasm threads and stack
+switching are gated by the vendored Wasmtime build/compiler configuration.
 
 ## P3 - Shared Memory
 

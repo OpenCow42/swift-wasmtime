@@ -46,6 +46,84 @@ public final class Config {
         }
     }
 
+    public var isSharedMemoryEnabled: Bool = false {
+        didSet {
+            wasmtime_config_shared_memory_set(requiredRaw, isSharedMemoryEnabled)
+        }
+    }
+
+    public var isTailCallEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_tail_call_set(requiredRaw, isTailCallEnabled)
+        }
+    }
+
+    public var isReferenceTypesEnabled: Bool = true {
+        didSet {
+            wasmtime_config_wasm_reference_types_set(requiredRaw, isReferenceTypesEnabled)
+        }
+    }
+
+    public var isFunctionReferencesEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_function_references_set(requiredRaw, isFunctionReferencesEnabled)
+        }
+    }
+
+    public var isWasmGCEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_gc_set(requiredRaw, isWasmGCEnabled)
+        }
+    }
+
+    public var isGCSupportEnabled: Bool = true {
+        didSet {
+            wasmtime_config_gc_support_set(requiredRaw, isGCSupportEnabled)
+        }
+    }
+
+    public var isBulkMemoryEnabled: Bool = true {
+        didSet {
+            wasmtime_config_wasm_bulk_memory_set(requiredRaw, isBulkMemoryEnabled)
+        }
+    }
+
+    public var isMultiValueEnabled: Bool = true {
+        didSet {
+            wasmtime_config_wasm_multi_value_set(requiredRaw, isMultiValueEnabled)
+        }
+    }
+
+    public var isMultiMemoryEnabled: Bool = true {
+        didSet {
+            wasmtime_config_wasm_multi_memory_set(requiredRaw, isMultiMemoryEnabled)
+        }
+    }
+
+    public var isMemory64Enabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_memory64_set(requiredRaw, isMemory64Enabled)
+        }
+    }
+
+    public var isWideArithmeticEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_wide_arithmetic_set(requiredRaw, isWideArithmeticEnabled)
+        }
+    }
+
+    public var areExceptionsEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_exceptions_set(requiredRaw, areExceptionsEnabled)
+        }
+    }
+
+    public var areCustomPageSizesEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_custom_page_sizes_set(requiredRaw, areCustomPageSizesEnabled)
+        }
+    }
+
     public var strategy: CompilationStrategy = .automatic {
         didSet {
             wasmtime_config_strategy_set(requiredRaw, strategy.rawValue)
@@ -55,6 +133,24 @@ public final class Config {
     public var craneliftOptimizationLevel: CraneliftOptimizationLevel = .speed {
         didSet {
             wasmtime_config_cranelift_opt_level_set(requiredRaw, craneliftOptimizationLevel.rawValue)
+        }
+    }
+
+    public var isCraneliftDebugVerifierEnabled: Bool = false {
+        didSet {
+            wasmtime_config_cranelift_debug_verifier_set(requiredRaw, isCraneliftDebugVerifierEnabled)
+        }
+    }
+
+    public var isCraneliftNaNCanonicalizationEnabled: Bool = false {
+        didSet {
+            wasmtime_config_cranelift_nan_canonicalization_set(requiredRaw, isCraneliftNaNCanonicalizationEnabled)
+        }
+    }
+
+    public var profiler: ProfilingStrategy = .none {
+        didSet {
+            wasmtime_config_profiler_set(requiredRaw, profiler.rawValue)
         }
     }
 
@@ -79,6 +175,24 @@ public final class Config {
     public var parallelCompilation: Bool = true {
         didSet {
             wasmtime_config_parallel_compilation_set(requiredRaw, parallelCompilation)
+        }
+    }
+
+    public var nativeUnwindInfo: Bool = true {
+        didSet {
+            wasmtime_config_native_unwind_info_set(requiredRaw, nativeUnwindInfo)
+        }
+    }
+
+    public var usesMachPortsOnMacOS: Bool = true {
+        didSet {
+            wasmtime_config_macos_use_mach_ports_set(requiredRaw, usesMachPortsOnMacOS)
+        }
+    }
+
+    public var usesMemoryInitCopyOnWrite: Bool = true {
+        didSet {
+            wasmtime_config_memory_init_cow_set(requiredRaw, usesMemoryInitCopyOnWrite)
         }
     }
 
@@ -154,12 +268,31 @@ public final class Config {
         isSIMDEnabled = options.isSIMDEnabled
         isRelaxedSIMDEnabled = options.isRelaxedSIMDEnabled
         isRelaxedSIMDDeterministic = options.isRelaxedSIMDDeterministic
+        isSharedMemoryEnabled = options.isSharedMemoryEnabled
+        isTailCallEnabled = options.isTailCallEnabled
+        isReferenceTypesEnabled = options.isReferenceTypesEnabled
+        isFunctionReferencesEnabled = options.isFunctionReferencesEnabled
+        isWasmGCEnabled = options.isWasmGCEnabled
+        isGCSupportEnabled = options.isGCSupportEnabled
+        isBulkMemoryEnabled = options.isBulkMemoryEnabled
+        isMultiValueEnabled = options.isMultiValueEnabled
+        isMultiMemoryEnabled = options.isMultiMemoryEnabled
+        isMemory64Enabled = options.isMemory64Enabled
+        isWideArithmeticEnabled = options.isWideArithmeticEnabled
+        areExceptionsEnabled = options.areExceptionsEnabled
+        areCustomPageSizesEnabled = options.areCustomPageSizesEnabled
         strategy = options.strategy
         craneliftOptimizationLevel = options.craneliftOptimizationLevel
+        isCraneliftDebugVerifierEnabled = options.isCraneliftDebugVerifierEnabled
+        isCraneliftNaNCanonicalizationEnabled = options.isCraneliftNaNCanonicalizationEnabled
+        profiler = options.profiler
         memoryMayMove = options.memoryMayMove
         signalsBasedTraps = options.signalsBasedTraps
         debugInfo = options.debugInfo
         parallelCompilation = options.parallelCompilation
+        nativeUnwindInfo = options.nativeUnwindInfo
+        usesMachPortsOnMacOS = options.usesMachPortsOnMacOS
+        usesMemoryInitCopyOnWrite = options.usesMemoryInitCopyOnWrite
         consumesFuel = options.interruption.consumesFuel
         usesEpochInterruption = options.interruption.usesEpochInterruption
 
@@ -216,12 +349,31 @@ public struct EngineOptions: Sendable, Equatable {
     public var isSIMDEnabled: Bool
     public var isRelaxedSIMDEnabled: Bool
     public var isRelaxedSIMDDeterministic: Bool
+    public var isSharedMemoryEnabled: Bool
+    public var isTailCallEnabled: Bool
+    public var isReferenceTypesEnabled: Bool
+    public var isFunctionReferencesEnabled: Bool
+    public var isWasmGCEnabled: Bool
+    public var isGCSupportEnabled: Bool
+    public var isBulkMemoryEnabled: Bool
+    public var isMultiValueEnabled: Bool
+    public var isMultiMemoryEnabled: Bool
+    public var isMemory64Enabled: Bool
+    public var isWideArithmeticEnabled: Bool
+    public var areExceptionsEnabled: Bool
+    public var areCustomPageSizesEnabled: Bool
     public var strategy: CompilationStrategy
     public var craneliftOptimizationLevel: CraneliftOptimizationLevel
+    public var isCraneliftDebugVerifierEnabled: Bool
+    public var isCraneliftNaNCanonicalizationEnabled: Bool
+    public var profiler: ProfilingStrategy
     public var memoryMayMove: Bool
     public var signalsBasedTraps: Bool
     public var debugInfo: Bool
     public var parallelCompilation: Bool
+    public var nativeUnwindInfo: Bool
+    public var usesMachPortsOnMacOS: Bool
+    public var usesMemoryInitCopyOnWrite: Bool
     public var target: String?
     public var enabledCraneliftFlags: [String]
     public var craneliftFlagValues: [String: String]
@@ -235,12 +387,31 @@ public struct EngineOptions: Sendable, Equatable {
         isSIMDEnabled: Bool = false,
         isRelaxedSIMDEnabled: Bool = false,
         isRelaxedSIMDDeterministic: Bool = false,
+        isSharedMemoryEnabled: Bool = false,
+        isTailCallEnabled: Bool = false,
+        isReferenceTypesEnabled: Bool = true,
+        isFunctionReferencesEnabled: Bool = false,
+        isWasmGCEnabled: Bool = false,
+        isGCSupportEnabled: Bool = true,
+        isBulkMemoryEnabled: Bool = true,
+        isMultiValueEnabled: Bool = true,
+        isMultiMemoryEnabled: Bool = true,
+        isMemory64Enabled: Bool = false,
+        isWideArithmeticEnabled: Bool = false,
+        areExceptionsEnabled: Bool = false,
+        areCustomPageSizesEnabled: Bool = false,
         strategy: CompilationStrategy = .automatic,
         craneliftOptimizationLevel: CraneliftOptimizationLevel = .speed,
+        isCraneliftDebugVerifierEnabled: Bool = false,
+        isCraneliftNaNCanonicalizationEnabled: Bool = false,
+        profiler: ProfilingStrategy = .none,
         memoryMayMove: Bool = false,
         signalsBasedTraps: Bool = true,
         debugInfo: Bool = false,
         parallelCompilation: Bool = true,
+        nativeUnwindInfo: Bool = true,
+        usesMachPortsOnMacOS: Bool = true,
+        usesMemoryInitCopyOnWrite: Bool = true,
         target: String? = nil,
         enabledCraneliftFlags: [String] = [],
         craneliftFlagValues: [String: String] = [:],
@@ -253,12 +424,31 @@ public struct EngineOptions: Sendable, Equatable {
         self.isSIMDEnabled = isSIMDEnabled
         self.isRelaxedSIMDEnabled = isRelaxedSIMDEnabled
         self.isRelaxedSIMDDeterministic = isRelaxedSIMDDeterministic
+        self.isSharedMemoryEnabled = isSharedMemoryEnabled
+        self.isTailCallEnabled = isTailCallEnabled
+        self.isReferenceTypesEnabled = isReferenceTypesEnabled
+        self.isFunctionReferencesEnabled = isFunctionReferencesEnabled
+        self.isWasmGCEnabled = isWasmGCEnabled
+        self.isGCSupportEnabled = isGCSupportEnabled
+        self.isBulkMemoryEnabled = isBulkMemoryEnabled
+        self.isMultiValueEnabled = isMultiValueEnabled
+        self.isMultiMemoryEnabled = isMultiMemoryEnabled
+        self.isMemory64Enabled = isMemory64Enabled
+        self.isWideArithmeticEnabled = isWideArithmeticEnabled
+        self.areExceptionsEnabled = areExceptionsEnabled
+        self.areCustomPageSizesEnabled = areCustomPageSizesEnabled
         self.strategy = strategy
         self.craneliftOptimizationLevel = craneliftOptimizationLevel
+        self.isCraneliftDebugVerifierEnabled = isCraneliftDebugVerifierEnabled
+        self.isCraneliftNaNCanonicalizationEnabled = isCraneliftNaNCanonicalizationEnabled
+        self.profiler = profiler
         self.memoryMayMove = memoryMayMove
         self.signalsBasedTraps = signalsBasedTraps
         self.debugInfo = debugInfo
         self.parallelCompilation = parallelCompilation
+        self.nativeUnwindInfo = nativeUnwindInfo
+        self.usesMachPortsOnMacOS = usesMachPortsOnMacOS
+        self.usesMemoryInitCopyOnWrite = usesMemoryInitCopyOnWrite
         self.target = target
         self.enabledCraneliftFlags = enabledCraneliftFlags
         self.craneliftFlagValues = craneliftFlagValues
@@ -313,6 +503,23 @@ public enum CraneliftOptimizationLevel: Sendable, Equatable {
         case .none: wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_NONE.rawValue)
         case .speed: wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED.rawValue)
         case .speedAndSize: wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED_AND_SIZE.rawValue)
+        }
+    }
+}
+
+/// Profiling integration used for generated JIT code.
+public enum ProfilingStrategy: Sendable, Equatable {
+    case none
+    case jitdump
+    case vtune
+    case perfmap
+
+    var rawValue: wasmtime_profiling_strategy_t {
+        switch self {
+        case .none: wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_NONE.rawValue)
+        case .jitdump: wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_JITDUMP.rawValue)
+        case .vtune: wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_VTUNE.rawValue)
+        case .perfmap: wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_PERFMAP.rawValue)
         }
     }
 }
@@ -2141,6 +2348,39 @@ public struct RuntimeComponentInstanceID: Sendable, Hashable, CustomStringConver
     }
 }
 
+/// Sendable snapshot of a table element read through `WasmtimeRuntime`.
+///
+/// Low-level non-null `funcref` values are store-bound `Func` handles. The
+/// runtime actor keeps those handles isolated and returns this value snapshot
+/// instead.
+public enum RuntimeTableElement: Sendable, Equatable, CustomStringConvertible {
+    case nullFunctionReference
+    case functionReference
+    case nullExternalReference
+
+    init(_ element: TableElement) {
+        switch element {
+        case .nullFunctionReference:
+            self = .nullFunctionReference
+        case .function:
+            self = .functionReference
+        case .nullExternalReference:
+            self = .nullExternalReference
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .nullFunctionReference:
+            "null funcref"
+        case .functionReference:
+            "funcref"
+        case .nullExternalReference:
+            "null externref"
+        }
+    }
+}
+
 /// Actor-serialized runtime surface for Swift concurrency.
 ///
 /// `WasmtimeRuntime` keeps non-`Sendable` Wasmtime store-bound handles inside
@@ -2307,17 +2547,77 @@ public actor WasmtimeRuntime {
         in instanceID: RuntimeInstanceID,
         arguments: [Value] = []
     ) throws -> [Value] {
-        guard let instance = instances[instanceID] else {
-            throw WasmtimeError.missingRuntimeInstance(instanceID)
-        }
+        let instance = try instance(for: instanceID)
         return try instance.exportedFunction(named: functionName).call(arguments)
     }
 
     public func exportKind(named name: String, in instanceID: RuntimeInstanceID) throws -> ExternKind {
-        guard let instance = instances[instanceID] else {
-            throw WasmtimeError.missingRuntimeInstance(instanceID)
-        }
+        let instance = try instance(for: instanceID)
         return try instance.export(named: name).kind
+    }
+
+    public func globalType(named globalName: String, in instanceID: RuntimeInstanceID) throws -> GlobalType {
+        let instance = try instance(for: instanceID)
+        return try instance.exportedGlobal(named: globalName).type()
+    }
+
+    public func globalValue(named globalName: String, in instanceID: RuntimeInstanceID) throws -> Value {
+        let instance = try instance(for: instanceID)
+        return try instance.exportedGlobal(named: globalName).get()
+    }
+
+    public func setGlobal(named globalName: String, in instanceID: RuntimeInstanceID, to value: Value) throws {
+        let instance = try instance(for: instanceID)
+        try instance.exportedGlobal(named: globalName).set(value)
+    }
+
+    public func tableType(named tableName: String = "table", in instanceID: RuntimeInstanceID) throws -> TableType {
+        let instance = try instance(for: instanceID)
+        return try instance.exportedTable(named: tableName).type()
+    }
+
+    public func tableSize(named tableName: String = "table", in instanceID: RuntimeInstanceID) throws -> UInt64 {
+        let instance = try instance(for: instanceID)
+        return try instance.exportedTable(named: tableName).size
+    }
+
+    public func tableElement(
+        named tableName: String = "table",
+        in instanceID: RuntimeInstanceID,
+        index: UInt64
+    ) throws -> RuntimeTableElement? {
+        let instance = try instance(for: instanceID)
+        return try instance.exportedTable(named: tableName).get(index: index).map(RuntimeTableElement.init)
+    }
+
+    public func setTableElementToNull(
+        named tableName: String = "table",
+        in instanceID: RuntimeInstanceID,
+        index: UInt64
+    ) throws {
+        let instance = try instance(for: instanceID)
+        let table = try instance.exportedTable(named: tableName)
+        try table.set(index: index, to: TableElement.null(for: try table.type().element))
+    }
+
+    public func setTableElement(
+        named tableName: String = "table",
+        in instanceID: RuntimeInstanceID,
+        index: UInt64,
+        toFunction functionName: String
+    ) throws {
+        let instance = try instance(for: instanceID)
+        let function = try instance.exportedFunction(named: functionName)
+        try instance.exportedTable(named: tableName).set(index: index, to: .function(function))
+    }
+
+    public func growTable(
+        named tableName: String = "table",
+        in instanceID: RuntimeInstanceID,
+        by deltaElements: UInt64
+    ) throws -> UInt64 {
+        let instance = try instance(for: instanceID)
+        return try instance.exportedTable(named: tableName).grow(by: deltaElements)
     }
 
     public func readMemory(
@@ -2326,9 +2626,7 @@ public actor WasmtimeRuntime {
         offset: Int,
         length: Int
     ) throws -> [UInt8] {
-        guard let instance = instances[instanceID] else {
-            throw WasmtimeError.missingRuntimeInstance(instanceID)
-        }
+        let instance = try instance(for: instanceID)
         return try instance.exportedMemory(named: memoryName).read(offset: offset, length: length)
     }
 
@@ -2338,9 +2636,7 @@ public actor WasmtimeRuntime {
         offset: Int,
         bytes: [UInt8]
     ) throws {
-        guard let instance = instances[instanceID] else {
-            throw WasmtimeError.missingRuntimeInstance(instanceID)
-        }
+        let instance = try instance(for: instanceID)
         try instance.exportedMemory(named: memoryName).write(offset: offset, bytes: bytes)
     }
 
@@ -2349,23 +2645,17 @@ public actor WasmtimeRuntime {
         in instanceID: RuntimeInstanceID,
         by deltaPages: UInt64
     ) throws -> UInt64 {
-        guard let instance = instances[instanceID] else {
-            throw WasmtimeError.missingRuntimeInstance(instanceID)
-        }
+        let instance = try instance(for: instanceID)
         return try instance.exportedMemory(named: memoryName).grow(by: deltaPages)
     }
 
     public func memorySize(named memoryName: String = "memory", in instanceID: RuntimeInstanceID) throws -> UInt64 {
-        guard let instance = instances[instanceID] else {
-            throw WasmtimeError.missingRuntimeInstance(instanceID)
-        }
+        let instance = try instance(for: instanceID)
         return try instance.exportedMemory(named: memoryName).size
     }
 
     public func memoryDataSize(named memoryName: String = "memory", in instanceID: RuntimeInstanceID) throws -> Int {
-        guard let instance = instances[instanceID] else {
-            throw WasmtimeError.missingRuntimeInstance(instanceID)
-        }
+        let instance = try instance(for: instanceID)
         return try instance.exportedMemory(named: memoryName).dataSize
     }
 
@@ -2374,6 +2664,13 @@ public actor WasmtimeRuntime {
             throw WasmtimeError.missingRuntimeComponentInstance(componentInstanceID)
         }
         try instance.exportedFunction(named: functionName).call()
+    }
+
+    private func instance(for instanceID: RuntimeInstanceID) throws -> Instance {
+        guard let instance = instances[instanceID] else {
+            throw WasmtimeError.missingRuntimeInstance(instanceID)
+        }
+        return instance
     }
 }
 
