@@ -3090,6 +3090,11 @@ public enum TrapCode: Sendable, Equatable, Hashable, CustomStringConvertible {
 }
 
 /// A WebAssembly stack frame captured from a trap or Wasmtime error trace.
+///
+/// This is an immutable snapshot of Wasmtime frame metadata. The underlying
+/// `wasm_frame_t` is not exposed because frame handles are tied to Wasmtime
+/// ownership and store-bound instance lifetimes, while diagnostics should be
+/// safe to inspect after the original trap/error has been released.
 public struct WasmFrame: Sendable, Equatable, CustomStringConvertible {
     public let functionIndex: UInt32
     public let functionOffset: Int
@@ -3134,6 +3139,9 @@ public struct WasmFrame: Sendable, Equatable, CustomStringConvertible {
 }
 
 /// WebAssembly trace captured from a trap or Wasmtime error.
+///
+/// Traces store Swift value snapshots rather than borrowed Wasmtime frame
+/// handles, so they can be retained or passed across concurrency boundaries.
 public struct WasmTrace: Sendable, Equatable, CustomStringConvertible {
     public let frames: [WasmFrame]
 

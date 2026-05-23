@@ -110,6 +110,13 @@ The public API is still intentionally small and pre-release in spirit. Public
 enums such as `Value`, `ValueKind`, `WasmtimeError`, and `ExternKind` may gain
 cases as more Wasmtime C API surface is wrapped.
 
+Trap diagnostics are exposed as Swift value snapshots. `WasmFrame` and
+`WasmTrace` copy the useful metadata from Wasmtime frames, including function
+indexes, offsets, and optional names, but they do not expose borrowed frame
+handles or store-bound frame instance handles. This keeps diagnostic values
+`Sendable` and safe to retain after the original trap or error has been
+released.
+
 ## Importing From SwiftPM
 
 Add the package dependency and point your target at the vendored Wasmtime library

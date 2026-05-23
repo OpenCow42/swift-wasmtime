@@ -282,19 +282,18 @@ Missing component APIs:
 
 ## P3 - Error, Trap, And Diagnostics
 
-Missing diagnostics APIs:
-
-- `wasm_frame_copy`
-- `wasm_frame_instance`
-
-Likely Swift shape:
+Diagnostics are intentionally exposed as Swift value snapshots rather than raw
+Wasmtime frame handles:
 
 - Raw Wasmtime error/trap constructors are intentionally not public today; use
   Swift value helpers such as `Trap.host(message:)`,
   `Trap.instruction(code:message:)`, `WasmtimeError.hostTrap(message:)`, and
   `WasmtimeError.hostError(message:exitStatus:)`.
-- Consider whether frame instance identity or frame copying need a public surface,
-  or whether immutable `WasmFrame` snapshots are enough.
+- `wasm_frame_copy` is not public because Swift callers receive owned
+  `WasmFrame` values, not borrowed frame handles that need copying.
+- `wasm_frame_instance` is not public because it would expose a store-bound
+  instance handle through a diagnostic frame and reintroduce lifetime/aliasing
+  concerns that `WasmFrame` is designed to avoid.
 
 ## P3 - Configuration Completeness
 
