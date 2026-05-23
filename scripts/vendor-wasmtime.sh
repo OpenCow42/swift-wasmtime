@@ -29,6 +29,9 @@ require tar
 
 mkdir -p "$work"
 curl -fsSL "https://api.github.com/repos/${repo}/releases/tags/${version}" -o "$release_json"
+mkdir -p "$root/Vendor/Wasmtime/${version}"
+curl -fsSL "https://raw.githubusercontent.com/${repo}/${version}/LICENSE" \
+  -o "$root/Vendor/Wasmtime/${version}/LICENSE"
 
 asset_field() {
   local target="$1"

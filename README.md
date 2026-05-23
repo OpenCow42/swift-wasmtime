@@ -31,6 +31,13 @@ For example, this package tag is `44.0.1`, matching the vendored Wasmtime
 and vendored paths keep the upstream spelling where they interact with
 Bytecode Alliance release assets.
 
+## License
+
+Swift Wasmtime is licensed under Apache-2.0 WITH LLVM-exception. The vendored
+Wasmtime C API artifacts and headers are provided by the Bytecode Alliance
+Wasmtime project under the same license. See `LICENSE` and
+`THIRD_PARTY_NOTICES.md`.
+
 ## Build And Test
 
 On this machine the Xcode toolchain is the known-good path:
@@ -65,4 +72,5 @@ scripts/vendor-wasmtime.sh v44.0.1
 
 The script downloads release metadata from GitHub, reads the official asset
 digests, downloads the supported C API archives, verifies SHA256 checksums,
-copies headers, and stores platform libraries under `Vendor/Wasmtime`.
+copies headers, preserves the upstream license, and stores platform libraries
+under `Vendor/Wasmtime`.
