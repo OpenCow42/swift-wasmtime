@@ -7,12 +7,55 @@ import Glibc
 import Darwin
 #endif
 
+public final class Config: @unchecked Sendable {
+    private var raw: OpaquePointer?
+
+    public init() throws {
+        guard let raw = wasm_config_new() else { // coverage:ignore defensive C allocation failure
+            throw WasmtimeError.allocationFailed("wasm_config_new returned nil")
+        }
+        self.raw = raw
+    }
+
+    public var isComponentModelEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_component_model_set(requiredRaw, isComponentModelEnabled)
+        }
+    }
+
+    func release() -> OpaquePointer {
+        let current = requiredRaw
+        raw = nil
+        return current
+    }
+
+    private var requiredRaw: OpaquePointer {
+        guard let raw else { // coverage:ignore programmer-error precondition
+            preconditionFailure("Config has already been consumed by Engine.init(config:)") // coverage:ignore crash branch
+        }
+        return raw
+    }
+
+    deinit {
+        if let raw {
+            wasm_config_delete(raw)
+        }
+    }
+}
+
 public final class Engine: @unchecked Sendable {
     let raw: OpaquePointer
 
     public init() throws {
         guard let raw = wasm_engine_new() else { // coverage:ignore defensive C allocation failure
             throw WasmtimeError.allocationFailed("wasm_engine_new returned nil")
+        }
+        self.raw = raw
+    }
+
+    public init(config: Config) throws {
+        guard let raw = wasm_engine_new_with_config(config.release()) else { // coverage:ignore defensive C allocation failure
+            throw WasmtimeError.allocationFailed("wasm_engine_new_with_config returned nil")
         }
         self.raw = raw
     }
@@ -39,6 +82,10 @@ public final class Store {
 
     public func setWasi(_ config: WasiConfig) throws {
         try WasmtimeError.throwIfNeeded(wasmtime_context_set_wasi(context, config.release()))
+    }
+
+    public func setWasiHTTP() {
+        wasmtime_context_set_wasi_http(context)
     }
 
     deinit {
@@ -80,6 +127,40 @@ public final class Module: @unchecked Sendable {
     }
 }
 
+public final class Component: @unchecked Sendable {
+    private let engine: Engine
+    let raw: OpaquePointer
+
+    public convenience init(engine: Engine, wasm: [UInt8]) throws {
+        try self.init(engine: engine, bytes: wasm)
+    }
+
+    public convenience init(engine: Engine, data: Data) throws {
+        try self.init(engine: engine, bytes: Array(data))
+    }
+
+    public convenience init(engine: Engine, wat: String) throws {
+        try self.init(engine: engine, bytes: WasmText.compile(wat))
+    }
+
+    private init(engine: Engine, bytes: [UInt8]) throws {
+        var component: OpaquePointer?
+        let error = bytes.withUnsafeBufferPointer { buffer in
+            wasmtime_component_new(engine.raw, buffer.baseAddress, buffer.count, &component)
+        }
+        try WasmtimeError.throwIfNeeded(error)
+        guard let component else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_component_new returned nil without an error")
+        }
+        self.engine = engine
+        self.raw = component
+    }
+
+    deinit {
+        wasmtime_component_delete(raw)
+    }
+}
+
 public final class Instance {
     private let store: Store
     let raw: wasmtime_instance_t
@@ -117,6 +198,34 @@ public final class Instance {
     }
 }
 
+public final class ComponentInstance {
+    private let store: Store
+    let raw: wasmtime_component_instance_t
+
+    init(store: Store, raw: wasmtime_component_instance_t) {
+        self.store = store
+        self.raw = raw
+    }
+
+    public func exportedFunction(named name: String) throws -> ComponentFunction {
+        var instance = raw
+        let exportIndex = name.withCString { cName in
+            wasmtime_component_instance_get_export_index(&instance, store.context, nil, cName, strlen(cName))
+        }
+        guard let exportIndex else {
+            throw WasmtimeError.missingExport(name)
+        }
+        defer { wasmtime_component_export_index_delete(exportIndex) }
+
+        var function = wasmtime_component_func_t()
+        guard wasmtime_component_instance_get_func(&instance, store.context, exportIndex, &function) else {
+            throw WasmtimeError.wrongExportKind(name: name, expected: "func", actual: "component export")
+        }
+
+        return ComponentFunction(store: store, raw: function)
+    }
+}
+
 public final class Linker {
     private let engine: Engine
     let raw: OpaquePointer
@@ -149,6 +258,44 @@ public final class Linker {
 
     deinit {
         wasmtime_linker_delete(raw)
+    }
+}
+
+public final class ComponentLinker {
+    private let engine: Engine
+    let raw: OpaquePointer
+
+    public init(engine: Engine) throws {
+        guard let raw = wasmtime_component_linker_new(engine.raw) else { // coverage:ignore defensive C allocation failure
+            throw WasmtimeError.allocationFailed("wasmtime_component_linker_new returned nil")
+        }
+        self.engine = engine
+        self.raw = raw
+    }
+
+    public var allowsShadowing: Bool = false {
+        didSet {
+            wasmtime_component_linker_allow_shadowing(raw, allowsShadowing)
+        }
+    }
+
+    public func addWasiP2() throws {
+        try WasmtimeError.throwIfNeeded(wasmtime_component_linker_add_wasip2(raw))
+    }
+
+    public func addWasiHTTP() throws {
+        try WasmtimeError.throwIfNeeded(wasmtime_component_linker_add_wasi_http(raw))
+    }
+
+    public func instantiate(store: Store, component: Component) throws -> ComponentInstance {
+        var instance = wasmtime_component_instance_t()
+        let error = wasmtime_component_linker_instantiate(raw, store.context, component.raw, &instance)
+        try WasmtimeError.throwIfNeeded(error)
+        return ComponentInstance(store: store, raw: instance)
+    }
+
+    deinit {
+        wasmtime_component_linker_delete(raw)
     }
 }
 
@@ -200,6 +347,23 @@ public final class Func {
             return 0
         }
         return results.pointee.size
+    }
+}
+
+public final class ComponentFunction {
+    private let store: Store
+    let raw: wasmtime_component_func_t
+
+    init(store: Store, raw: wasmtime_component_func_t) {
+        self.store = store
+        self.raw = raw
+    }
+
+    public func call() throws {
+        var function = raw
+        try WasmtimeError.throwIfNeeded(
+            wasmtime_component_func_call(&function, store.context, nil, 0, nil, 0)
+        )
     }
 }
 

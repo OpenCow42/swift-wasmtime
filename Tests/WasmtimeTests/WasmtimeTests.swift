@@ -27,6 +27,29 @@ import Testing
     _ = try Module(engine: engine, wat: "(module)")
 }
 
+@Test func configEnablesComponentModelAndComponentsCompileFromWatBytesAndData() throws {
+    do {
+        let config = try Config()
+        config.isComponentModelEnabled = true
+    }
+
+    let config = try Config()
+    config.isComponentModelEnabled = true
+    acceptsSendable(config)
+    let engine = try Engine(config: config)
+    let bytes = try WasmText.compile(componentRunWat)
+
+    let bytesComponent = try Component(engine: engine, wasm: bytes)
+    acceptsSendable(bytesComponent)
+
+    _ = try Component(engine: engine, data: Data(bytes))
+    _ = try Component(engine: engine, wat: componentRunWat)
+
+    try expectWasmtimeError {
+        _ = try Component(engine: engine, wat: "(module)")
+    }
+}
+
 @Test func invalidWatAndWasmBecomeErrors() throws {
     let engine = try Engine()
 
@@ -202,6 +225,60 @@ import Testing
     wasi.inheritStandardError()
     try store.setWasi(wasi)
     try linker.defineWasi()
+}
+
+@Test func componentLinkerInstantiatesAndCallsZeroParameterZeroResultFunctions() throws {
+    let config = try Config()
+    config.isComponentModelEnabled = true
+    let engine = try Engine(config: config)
+    let store = try Store(engine: engine)
+    let component = try Component(engine: engine, wat: componentRunWat)
+    let linker = try ComponentLinker(engine: engine)
+
+    linker.allowsShadowing = true
+    let instance = try linker.instantiate(store: store, component: component)
+    try instance.exportedFunction(named: "run").call()
+
+    try expectSpecificError(.missingExport("missing")) {
+        _ = try instance.exportedFunction(named: "missing")
+    }
+}
+
+@Test func componentExportedFunctionReportsWrongKindExports() throws {
+    let config = try Config()
+    config.isComponentModelEnabled = true
+    let engine = try Engine(config: config)
+    let store = try Store(engine: engine)
+    let component = try Component(
+        engine: engine,
+        wat: """
+        (component
+          (instance $empty)
+          (export "not-func" (instance $empty)))
+        """
+    )
+    let instance = try ComponentLinker(engine: engine).instantiate(store: store, component: component)
+
+    do {
+        _ = try instance.exportedFunction(named: "not-func")
+        Issue.record("expected wrong export kind error")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected func"))
+    }
+}
+
+@Test func componentLinkerRegistersWasiP2AndHTTP() throws {
+    let config = try Config()
+    config.isComponentModelEnabled = true
+    let engine = try Engine(config: config)
+    let store = try Store(engine: engine)
+    let wasi = try WasiConfig()
+    try store.setWasi(wasi)
+    store.setWasiHTTP()
+
+    let linker = try ComponentLinker(engine: engine)
+    try linker.addWasiP2()
+    try linker.addWasiHTTP()
 }
 
 @Test func wasiFileConfigurationReportsFailuresAndSuccesses() throws {
@@ -391,6 +468,14 @@ import Testing
 private func acceptsSendable<T: Sendable>(_ value: T) {
     _ = value
 }
+
+private let componentRunWat = """
+(component
+  (core module $m
+    (func (export "run")))
+  (core instance $i (instantiate $m))
+  (func (export "run") (canon lift (core func $i "run"))))
+"""
 
 private func expectWasmtimeError(_ body: () throws -> Void) throws {
     do {

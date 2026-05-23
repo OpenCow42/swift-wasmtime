@@ -6,8 +6,12 @@ small Swift 6 API, and keeps the C ownership rules explicit.
 
 ## Current Scope
 
-- Core runtime wrappers: `Engine`, `Store`, `Module`, `Instance`, `Linker`,
-  `Func`, `Value`, `Trap`, `WasmtimeError`, and `WasiConfig`.
+- Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`, `Instance`,
+  `Linker`, `Func`, `Value`, `Trap`, `WasmtimeError`, and `WasiConfig`.
+- Early component-model wrappers: `Component`, `ComponentLinker`,
+  `ComponentInstance`, and `ComponentFunction` for compiling components,
+  registering WASIp2/WASI HTTP host interfaces, instantiating components, and
+  calling zero-parameter, zero-result component functions.
 - Module compilation from Wasm bytes, `Data`, or WAT text via Wasmtime's
   `wat2wasm` C API.
 - Direct instantiation, linker instantiation, exported function lookup, scalar
