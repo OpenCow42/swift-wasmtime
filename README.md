@@ -37,8 +37,8 @@ source target.
   `wat2wasm` C API.
 - Direct instantiation, linker instantiation, exported function lookup, scalar
   calls for `i32`, `i64`, `f32`, and `f64`, trap/error conversion, and basic
-  WASI configuration including arguments, environment, stdio, and preopened
-  directories.
+  WASI configuration including arguments, environment, stdio files, stdin bytes,
+  stdout/stderr callbacks, and preopened directories.
 - Vendored Wasmtime version: `v44.0.1`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
 
@@ -150,7 +150,11 @@ workflows without leaking store-bound handles across concurrency domains:
 let wasi = WasiOptions(
     arguments: ["guest.wasm"],
     environment: ["LOG": "debug"],
-    standardOutputFile: "/tmp/guest.stdout"
+    standardInputBytes: Array("request body".utf8),
+    standardOutputHandler: { output in
+        print(String(decoding: output, as: UTF8.self))
+        return output.count
+    }
 )
 try await runtime.setWasi(wasi)
 

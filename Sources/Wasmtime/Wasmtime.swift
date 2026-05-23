@@ -785,12 +785,34 @@ public final class WasiConfig {
         wasi_config_inherit_stdin(requiredRaw)
     }
 
+    public func setStandardInputBytes(_ bytes: [UInt8]) {
+        var byteVector = wasm_byte_vec_t()
+        bytes.withUnsafeBufferPointer { buffer in
+            wasm_byte_vec_new(&byteVector, buffer.count, buffer.baseAddress)
+        }
+        wasi_config_set_stdin_bytes(requiredRaw, &byteVector)
+    }
+
+    public func setStandardInputData(_ data: Data) {
+        setStandardInputBytes(Array(data))
+    }
+
     public func inheritStandardOutput() {
         wasi_config_inherit_stdout(requiredRaw)
     }
 
     public func inheritStandardError() {
         wasi_config_inherit_stderr(requiredRaw)
+    }
+
+    public func setStandardOutputHandler(_ handler: @escaping WasiOutputHandler) {
+        let box = Unmanaged.passRetained(WasiOutputHandlerBox(handler))
+        wasi_config_set_stdout_custom(requiredRaw, wasiOutputHandlerCallback, box.toOpaque(), wasiOutputHandlerFinalizer)
+    }
+
+    public func setStandardErrorHandler(_ handler: @escaping WasiOutputHandler) {
+        let box = Unmanaged.passRetained(WasiOutputHandlerBox(handler))
+        wasi_config_set_stderr_custom(requiredRaw, wasiOutputHandlerCallback, box.toOpaque(), wasiOutputHandlerFinalizer)
     }
 
     public func setStandardInputFile(_ path: String) throws {
@@ -860,15 +882,20 @@ public final class WasiConfig {
     }
 }
 
-public struct WasiOptions: Sendable, Equatable {
+public typealias WasiOutputHandler = @Sendable (Data) -> Int
+
+public struct WasiOptions: Sendable {
     public var arguments: [String]?
     public var inheritArguments: Bool
     public var environment: [String: String]?
     public var inheritEnvironment: Bool
+    public var standardInputBytes: [UInt8]?
     public var standardInputFile: String?
     public var inheritStandardInput: Bool
+    public var standardOutputHandler: WasiOutputHandler?
     public var standardOutputFile: String?
     public var inheritStandardOutput: Bool
+    public var standardErrorHandler: WasiOutputHandler?
     public var standardErrorFile: String?
     public var inheritStandardError: Bool
     public var preopenedDirectories: [WasiPreopenedDirectory]
@@ -878,10 +905,13 @@ public struct WasiOptions: Sendable, Equatable {
         inheritArguments: Bool = false,
         environment: [String: String]? = nil,
         inheritEnvironment: Bool = false,
+        standardInputBytes: [UInt8]? = nil,
         standardInputFile: String? = nil,
         inheritStandardInput: Bool = false,
+        standardOutputHandler: WasiOutputHandler? = nil,
         standardOutputFile: String? = nil,
         inheritStandardOutput: Bool = false,
+        standardErrorHandler: WasiOutputHandler? = nil,
         standardErrorFile: String? = nil,
         inheritStandardError: Bool = false,
         preopenedDirectories: [WasiPreopenedDirectory] = []
@@ -890,10 +920,13 @@ public struct WasiOptions: Sendable, Equatable {
         self.inheritArguments = inheritArguments
         self.environment = environment
         self.inheritEnvironment = inheritEnvironment
+        self.standardInputBytes = standardInputBytes
         self.standardInputFile = standardInputFile
         self.inheritStandardInput = inheritStandardInput
+        self.standardOutputHandler = standardOutputHandler
         self.standardOutputFile = standardOutputFile
         self.inheritStandardOutput = inheritStandardOutput
+        self.standardErrorHandler = standardErrorHandler
         self.standardErrorFile = standardErrorFile
         self.inheritStandardError = inheritStandardError
         self.preopenedDirectories = preopenedDirectories
@@ -913,17 +946,26 @@ public struct WasiOptions: Sendable, Equatable {
         if inheritEnvironment {
             config.inheritEnvironment()
         }
+        if let standardInputBytes {
+            config.setStandardInputBytes(standardInputBytes)
+        }
         if let standardInputFile {
             try config.setStandardInputFile(standardInputFile)
         }
         if inheritStandardInput {
             config.inheritStandardInput()
         }
+        if let standardOutputHandler {
+            config.setStandardOutputHandler(standardOutputHandler)
+        }
         if let standardOutputFile {
             try config.setStandardOutputFile(standardOutputFile)
         }
         if inheritStandardOutput {
             config.inheritStandardOutput()
+        }
+        if let standardErrorHandler {
+            config.setStandardErrorHandler(standardErrorHandler)
         }
         if let standardErrorFile {
             try config.setStandardErrorFile(standardErrorFile)
@@ -1173,6 +1215,34 @@ private func withCStringArray<T>(_ strings: [String], _ body: (UnsafeMutableBuff
     return try pointers.withUnsafeMutableBufferPointer { buffer in
         try body(buffer)
     }
+}
+
+private final class WasiOutputHandlerBox {
+    let handler: WasiOutputHandler
+
+    init(_ handler: @escaping WasiOutputHandler) {
+        self.handler = handler
+    }
+}
+
+private func wasiOutputHandlerCallback(
+    data: UnsafeMutableRawPointer?,
+    buffer: UnsafePointer<CUnsignedChar>?,
+    size: Int
+) -> Int {
+    guard let data, let buffer else { // coverage:ignore defensive C callback invariant
+        return -1
+    }
+    let box = Unmanaged<WasiOutputHandlerBox>.fromOpaque(data).takeUnretainedValue()
+    let output = Data(bytes: buffer, count: size)
+    return box.handler(output)
+}
+
+private func wasiOutputHandlerFinalizer(data: UnsafeMutableRawPointer?) {
+    guard let data else { // coverage:ignore defensive C callback invariant
+        return
+    }
+    Unmanaged<WasiOutputHandlerBox>.fromOpaque(data).release()
 }
 
 private extension wasm_byte_vec_t {

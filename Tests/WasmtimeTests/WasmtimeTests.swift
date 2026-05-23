@@ -252,10 +252,13 @@ import Testing
         inheritArguments: true,
         environment: ["A": "B"],
         inheritEnvironment: true,
+        standardInputBytes: Array("options-stdin\n".utf8),
         standardInputFile: stdin.path,
         inheritStandardInput: true,
+        standardOutputHandler: { output in output.count },
         standardOutputFile: stdout.path,
         inheritStandardOutput: true,
+        standardErrorHandler: { output in output.count },
         standardErrorFile: stderr.path,
         inheritStandardError: true,
         preopenedDirectories: [
@@ -553,6 +556,36 @@ import Testing
     try config.setStandardErrorFile(temporary.path)
 }
 
+@Test func wasiStandardInputBytesAndOutputCallbacksRoundTripData() throws {
+    let stdout = LockedOutputBuffer()
+    let stderr = LockedOutputBuffer()
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(engine: engine, wat: wasiStdioWat)
+    let wasi = try WasiConfig()
+
+    wasi.setStandardInputData(Data("callback-stdin\n".utf8))
+    wasi.setStandardOutputHandler { output in
+        stdout.append(output)
+        return output.count
+    }
+    wasi.setStandardErrorHandler { output in
+        stderr.append(output)
+        return output.count
+    }
+    try store.setWasi(wasi)
+    let linker = try Linker(engine: engine)
+    try linker.defineWasi()
+    let instance = try linker.instantiate(store: store, module: module)
+
+    #expect(try instance.exportedFunction(named: "_start").call() == [])
+    #expect(stdout.string() == "callback-stdin\n")
+    #expect(stderr.string() == "callback-stderr\n")
+
+    let bytesConfig = try WasiConfig()
+    bytesConfig.setStandardInputBytes(Array("bytes\n".utf8))
+}
+
 @Test func wasiPreopenedDirectoryGrantsReadAccess() throws {
     let temporary = URL(fileURLWithPath: NSTemporaryDirectory())
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
@@ -719,6 +752,23 @@ private func acceptsSendable<T: Sendable>(_ value: T) {
     _ = value
 }
 
+private final class LockedOutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes: [UInt8] = []
+
+    func append(_ data: Data) {
+        lock.withLock {
+            bytes.append(contentsOf: data)
+        }
+    }
+
+    func string() -> String {
+        lock.withLock {
+            String(decoding: bytes, as: UTF8.self)
+        }
+    }
+}
+
 private let nativeSIMDFlag = {
     #if arch(x86_64)
     "has_sse2"
@@ -759,6 +809,50 @@ private let simdWat = """
 (module
   (func (export "simd") (result v128)
     v128.const i32x4 1 2 3 4))
+"""
+
+private let wasiStdioWat = """
+(module
+  (import "wasi_snapshot_preview1" "fd_read" (func $fd_read (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (memory 1)
+  (export "memory" (memory 0))
+  (data (i32.const 160) "callback-stderr\\n")
+  (func $write (param $fd i32) (param $ptr i32) (param $len i32)
+    i32.const 24
+    local.get $ptr
+    i32.store
+    i32.const 28
+    local.get $len
+    i32.store
+    local.get $fd
+    i32.const 24
+    i32.const 1
+    i32.const 32
+    call $fd_write
+    drop)
+  (func (export "_start")
+    i32.const 0
+    i32.const 64
+    i32.store
+    i32.const 4
+    i32.const 32
+    i32.store
+    i32.const 0
+    i32.const 0
+    i32.const 1
+    i32.const 16
+    call $fd_read
+    drop
+    i32.const 1
+    i32.const 64
+    i32.const 16
+    i32.load
+    call $write
+    i32.const 2
+    i32.const 160
+    i32.const 16
+    call $write))
 """
 
 private func expectWasmtimeError(_ body: () throws -> Void) throws {
