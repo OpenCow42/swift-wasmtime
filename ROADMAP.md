@@ -285,23 +285,15 @@ Missing component APIs:
 Missing diagnostics APIs:
 
 - `wasmtime_error_new`
-- `wasmtime_error_wasm_trace`
 - `wasmtime_trap_new`
 - `wasmtime_trap_new_code`
-- `wasm_trap_origin`
-- `wasm_trap_trace`
 - `wasm_frame_copy`
 - `wasm_frame_instance`
-- `wasm_frame_func_index`
-- `wasm_frame_func_offset`
-- `wasm_frame_module_offset`
-- `wasmtime_frame_func_name`
-- `wasmtime_frame_module_name`
 
 Likely Swift shape:
 
-- Add `WasmFrame` and `WasmTrace` sendable value types.
-- Include trace information in `Trap` and `WasmtimeError.api` where available.
+- Consider whether frame instance identity or frame copying need a public surface,
+  or whether immutable `WasmFrame` snapshots are enough.
 - Consider public helpers for creating host-side Wasmtime errors only when
   needed by host callbacks.
 

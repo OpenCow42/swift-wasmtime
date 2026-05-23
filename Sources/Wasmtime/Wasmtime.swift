@@ -2882,16 +2882,106 @@ public struct RuntimeHostFunction: Sendable {
     }
 }
 
+/// A WebAssembly stack frame captured from a trap or Wasmtime error trace.
+public struct WasmFrame: Sendable, Equatable, CustomStringConvertible {
+    public let functionIndex: UInt32
+    public let functionOffset: Int
+    public let moduleOffset: Int
+    public let functionName: String?
+    public let moduleName: String?
+
+    public init(
+        functionIndex: UInt32,
+        functionOffset: Int,
+        moduleOffset: Int,
+        functionName: String? = nil,
+        moduleName: String? = nil
+    ) {
+        self.functionIndex = functionIndex
+        self.functionOffset = functionOffset
+        self.moduleOffset = moduleOffset
+        self.functionName = functionName
+        self.moduleName = moduleName
+    }
+
+    public var description: String {
+        var parts = ["func #\(functionIndex)"]
+        if let functionName, !functionName.isEmpty {
+            parts.append("(\(functionName))")
+        }
+        if let moduleName, !moduleName.isEmpty {
+            parts.append("in \(moduleName)")
+        }
+        parts.append("func offset \(functionOffset)")
+        parts.append("module offset \(moduleOffset)")
+        return parts.joined(separator: " ")
+    }
+
+    fileprivate init(raw: OpaquePointer) {
+        functionIndex = wasm_frame_func_index(raw)
+        functionOffset = Int(wasm_frame_func_offset(raw))
+        moduleOffset = Int(wasm_frame_module_offset(raw))
+        functionName = wasmtime_frame_func_name(raw).map { String(wasmByteVec: $0.pointee) }
+        moduleName = wasmtime_frame_module_name(raw).map { String(wasmByteVec: $0.pointee) }
+    }
+}
+
+/// WebAssembly trace captured from a trap or Wasmtime error.
+public struct WasmTrace: Sendable, Equatable, CustomStringConvertible {
+    public let frames: [WasmFrame]
+
+    public init(frames: [WasmFrame] = []) {
+        self.frames = frames
+    }
+
+    public var isEmpty: Bool {
+        frames.isEmpty
+    }
+
+    public var description: String {
+        frames.map(\.description).joined(separator: "\n")
+    }
+
+    fileprivate init(raw vector: wasm_frame_vec_t) {
+        guard vector.size > 0 else {
+            frames = []
+            return
+        }
+        guard let data = vector.data else {
+            frames = [] // coverage:ignore defensive C invariant
+            return // coverage:ignore defensive C invariant
+        }
+        frames = (0..<Int(vector.size)).compactMap { index in
+            data[index].map { WasmFrame(raw: $0) }
+        }
+    }
+}
+
 /// WebAssembly trap surfaced from guest execution.
 public struct Trap: Sendable, Equatable, CustomStringConvertible {
     public let message: String
     public let code: UInt8?
+    public let origin: WasmFrame?
+    public let trace: WasmTrace
+
+    public init(message: String, code: UInt8?, origin: WasmFrame? = nil, trace: WasmTrace = WasmTrace()) {
+        self.message = message
+        self.code = code
+        self.origin = origin
+        self.trace = trace
+    }
 
     public var description: String {
+        let base: String
         if let code {
-            return "\(message) (trap code \(code))"
+            base = "\(message) (trap code \(code))"
+        } else {
+            base = message
         }
-        return message
+        guard !trace.isEmpty else {
+            return base
+        }
+        return "\(base)\n\(trace.description)"
     }
 
     static func fromOwned(_ raw: OpaquePointer) -> Trap {
@@ -2902,7 +2992,23 @@ public struct Trap: Sendable, Equatable, CustomStringConvertible {
 
         var code: wasmtime_trap_code_t = 0
         let hasCode = wasmtime_trap_code(raw, &code)
-        return Trap(message: String(wasmByteVec: message), code: hasCode ? code : nil)
+
+        let origin = wasm_trap_origin(raw).map { frame in
+            defer { wasm_frame_delete(frame) }
+            return WasmFrame(raw: frame)
+        }
+
+        var traceVector = wasm_frame_vec_t()
+        wasm_trap_trace(raw, &traceVector)
+        defer { wasm_frame_vec_delete(&traceVector) }
+        let trace = WasmTrace(raw: traceVector)
+
+        return Trap(
+            message: String(wasmByteVec: message),
+            code: hasCode ? code : nil,
+            origin: origin,
+            trace: trace
+        )
     }
 }
 
@@ -2911,6 +3017,7 @@ public struct Trap: Sendable, Equatable, CustomStringConvertible {
 /// This enum may gain cases as more Wasmtime API surface is wrapped.
 public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
     case api(message: String, exitStatus: Int32?)
+    case apiWithTrace(message: String, exitStatus: Int32?, trace: WasmTrace)
     case trap(Trap)
     case allocationFailed(String)
     case missingExport(String)
@@ -2929,6 +3036,17 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
                 return "\(message) (WASI exit status \(exitStatus))"
             }
             return message
+        case .apiWithTrace(let message, let exitStatus, let trace):
+            let base: String
+            if let exitStatus {
+                base = "\(message) (WASI exit status \(exitStatus))"
+            } else {
+                base = message
+            }
+            guard !trace.isEmpty else {
+                return base
+            }
+            return "\(base)\n\(trace.description)"
         case .trap(let trap):
             return trap.description
         case .allocationFailed(let message), .wasiConfigurationFailed(let message):
@@ -2950,6 +3068,17 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
         }
     }
 
+    public var trace: WasmTrace {
+        switch self {
+        case .trap(let trap):
+            return trap.trace
+        case .apiWithTrace(_, _, let trace):
+            return trace
+        default:
+            return WasmTrace()
+        }
+    }
+
     static func throwIfNeeded(_ error: OpaquePointer?, trap: OpaquePointer? = nil) throws {
         if let error {
             throw WasmtimeError.fromOwned(error)
@@ -2967,7 +3096,15 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
 
         var exitStatus: Int32 = 0
         let hasExitStatus = wasmtime_error_exit_status(raw, &exitStatus)
-        return .api(message: String(wasmByteVec: message), exitStatus: hasExitStatus ? exitStatus : nil)
+        var traceVector = wasm_frame_vec_t()
+        wasmtime_error_wasm_trace(raw, &traceVector)
+        defer { wasm_frame_vec_delete(&traceVector) }
+        let trace = WasmTrace(raw: traceVector)
+        let swiftMessage = String(wasmByteVec: message)
+        guard !trace.isEmpty else {
+            return .api(message: swiftMessage, exitStatus: hasExitStatus ? exitStatus : nil)
+        }
+        return .apiWithTrace(message: swiftMessage, exitStatus: hasExitStatus ? exitStatus : nil, trace: trace)
     }
 }
 

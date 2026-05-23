@@ -28,6 +28,8 @@ import Testing
     acceptsSendable(WasiOptions())
     acceptsSendable(WasiPreopenedDirectory(hostPath: "/", guestPath: "/host"))
     acceptsSendable(Trap(message: "trap", code: nil))
+    acceptsSendable(WasmFrame(functionIndex: 0, functionOffset: 1, moduleOffset: 2))
+    acceptsSendable(WasmTrace())
     acceptsSendable(WasmtimeError.missingExport("missing"))
     acceptsSendable(ModuleGlobalType(content: .i32))
     acceptsSendable(ModuleTableType(minimumElements: 0))
@@ -394,8 +396,8 @@ import Testing
     do {
         _ = try terminateInstance.exportedFunction(named: "count").call([.i32(100)])
         Issue.record("expected epoch callback error")
-    } catch WasmtimeError.api(let message, nil) {
-        #expect(message.contains("deadline stopped"))
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("deadline stopped"))
     }
 }
 
@@ -1259,7 +1261,7 @@ import Testing
 }
 
 @Test func runtimeActorConfiguresWasiAndInstantiatesWithLinker() async throws {
-    let temporary = URL(fileURLWithPath: NSTemporaryDirectory())
+    let temporary = testTemporaryDirectory()
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
     let sandbox = temporary.appendingPathComponent("sandbox", isDirectory: true)
     let stdout = temporary.appendingPathComponent("stdout.txt")
@@ -1358,8 +1360,8 @@ import Testing
     do {
         _ = try await runtime.call("run", in: trapInstance)
         Issue.record("expected unknown-import trap")
-    } catch WasmtimeError.api(let message, nil) {
-        #expect(message.contains("unknown import"))
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("unknown import"))
     }
 }
 
@@ -1594,9 +1596,21 @@ import Testing
     do {
         _ = try boom.call()
         Issue.record("expected trap")
-    } catch WasmtimeError.trap(let trap) {
+    } catch let error as WasmtimeError {
+        guard case .trap(let trap) = error else {
+            Issue.record("expected trap")
+            return
+        }
         #expect(trap.description.contains("unreachable"))
         #expect(trap.code != nil)
+        #expect(!trap.trace.isEmpty)
+        #expect(error.trace == trap.trace)
+        let frame = try #require(trap.trace.frames.first)
+        #expect(trap.origin == frame)
+        #expect(frame.functionIndex == 0)
+        #expect(frame.functionOffset >= 0)
+        #expect(frame.moduleOffset >= 0)
+        #expect(trap.description.contains("func #0"))
     }
 }
 
@@ -1707,8 +1721,8 @@ import Testing
     do {
         _ = try trapInstance.exportedFunction(named: "run").call()
         Issue.record("expected trap")
-    } catch WasmtimeError.api(let message, nil) {
-        #expect(message.contains("unknown import"))
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("unknown import"))
     }
 
     let defaultModule = try Module(
@@ -1866,8 +1880,8 @@ import Testing
     do {
         _ = try throwingInstance.exportedFunction(named: "run").call()
         Issue.record("expected host trap")
-    } catch WasmtimeError.api(let message, nil) {
-        #expect(message.contains("host failed"))
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("host failed"))
     }
 
     let wrongCountModule = try Module(
@@ -1887,8 +1901,8 @@ import Testing
     do {
         _ = try wrongCountInstance.exportedFunction(named: "run").call()
         Issue.record("expected result count trap")
-    } catch WasmtimeError.api(let message, nil) {
-        #expect(message.contains("expected 1"))
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected 1"))
     }
 
     let wrongKindLinker = try Linker(engine: engine)
@@ -1899,8 +1913,8 @@ import Testing
     do {
         _ = try wrongKindInstance.exportedFunction(named: "run").call()
         Issue.record("expected result kind trap")
-    } catch WasmtimeError.api(let message, nil) {
-        #expect(message.contains("expected i32"))
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected i32"))
     }
 }
 
@@ -1980,8 +1994,8 @@ import Testing
     do {
         _ = try instance.exportedFunction(named: "run").call()
         Issue.record("expected memory bounds trap")
-    } catch WasmtimeError.api(let message, nil) {
-        #expect(message.contains("memory access out of bounds"))
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("memory access out of bounds"))
     }
     #expect(
         WasmtimeError.memoryAccessOutOfBounds(offset: 1, length: 2, memorySize: 3).description ==
@@ -2095,7 +2109,7 @@ import Testing
         try config.preopenDirectory(hostPath: "/definitely/not/here", guestPath: "/missing")
     }
 
-    let temporary = URL(fileURLWithPath: NSTemporaryDirectory())
+    let temporary = testTemporaryDirectory()
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)")
     FileManager.default.createFile(atPath: temporary.path, contents: Data())
     defer { try? FileManager.default.removeItem(at: temporary) }
@@ -2136,7 +2150,7 @@ import Testing
 }
 
 @Test func wasiPreopenedDirectoryGrantsReadAccess() throws {
-    let temporary = URL(fileURLWithPath: NSTemporaryDirectory())
+    let temporary = testTemporaryDirectory()
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
     let sandbox = temporary.appendingPathComponent("sandbox", isDirectory: true)
     let stdout = temporary.appendingPathComponent("stdout.txt")
@@ -2265,6 +2279,23 @@ import Testing
     #expect(Trap(message: "boom", code: 9).description == "boom (trap code 9)")
     #expect(Trap(message: "boom", code: nil).description == "boom")
     #expect(WasmtimeError.trap(Trap(message: "boom", code: nil)).description == "boom")
+    let frame = WasmFrame(
+        functionIndex: 3,
+        functionOffset: 7,
+        moduleOffset: 11,
+        functionName: "run",
+        moduleName: "fixture"
+    )
+    let trace = WasmTrace(frames: [frame])
+    #expect(frame.description == "func #3 (run) in fixture func offset 7 module offset 11")
+    #expect(trace.description == frame.description)
+    #expect(!trace.isEmpty)
+    #expect(Trap(message: "boom", code: nil, trace: trace).description.contains(frame.description))
+    #expect(WasmtimeError.apiWithTrace(message: "bad", exitStatus: 2, trace: trace).description.contains(frame.description))
+    #expect(WasmtimeError.apiWithTrace(message: "bad", exitStatus: nil, trace: WasmTrace()).description == "bad")
+    #expect(WasmtimeError.trap(Trap(message: "boom", code: nil, trace: trace)).trace == trace)
+    #expect(WasmtimeError.apiWithTrace(message: "bad", exitStatus: nil, trace: trace).trace == trace)
+    #expect(WasmtimeError.missingExport("gone").trace.isEmpty)
     #expect(WasmtimeError.allocationFailed("nope").description == "nope")
     #expect(WasmtimeError.missingExport("gone").description == "missing export: gone")
     #expect(RuntimeInstanceID(rawValue: 7).description == "runtime instance 7")
@@ -2327,11 +2358,22 @@ import Testing
     let hostTrap = try message.withCString { cMessage in
         try #require(wasmtime_trap_new(cMessage, strlen(cMessage)))
     }
-    #expect(Trap.fromOwned(hostTrap).description.contains("host trap"))
+    let swiftHostTrap = Trap.fromOwned(hostTrap)
+    #expect(swiftHostTrap.description.contains("host trap"))
+    #expect(swiftHostTrap.origin == nil)
+    #expect(swiftHostTrap.trace.isEmpty)
 }
 
 private func acceptsSendable<T: Sendable>(_ value: T) {
     _ = value
+}
+
+private func testTemporaryDirectory() -> URL {
+    let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent(".build", isDirectory: true)
+        .appendingPathComponent("test-tmp", isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
 }
 
 private final class LockedOutputBuffer: @unchecked Sendable {
