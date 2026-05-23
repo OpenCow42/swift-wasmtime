@@ -22,9 +22,9 @@ source target.
 ## Current Scope
 
 - Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`, `Instance`,
-  `Linker`, `Extern`, `Func`, `GlobalType`, `Global`, `TableElementKind`,
-  `TableElement`, `TableType`, `Table`, `MemoryType`, `Memory`, `Value`,
-  `Trap`, `WasmtimeError`, and `WasiConfig`.
+  `InstancePre`, `Linker`, `Extern`, `Func`, `GlobalType`, `Global`,
+  `TableElementKind`, `TableElement`, `TableType`, `Table`, `MemoryType`,
+  `Memory`, `Value`, `Trap`, `WasmtimeError`, and `WasiConfig`.
 - Swift 6 thread-safe surface: `EngineOptions` for sendable engine
   configuration, `WasiOptions` for sendable WASI configuration, and
   `WasmtimeRuntime` for actor-serialized store execution.
@@ -64,8 +64,10 @@ source target.
   store-bound functions, defining unknown imports as traps or default values,
   store-bound globals and memories, defining an instantiated module namespace,
   registering a module by name, cloning linker definitions, resolving a named
-  module's default function, and instantiating modules through that linker. The
-  remaining low-level extern definition surface for tags is not exposed yet.
+  module's default function, instantiating modules through that linker, and
+  pre-instantiating modules with `InstancePre` for reuse across compatible
+  stores. The remaining low-level extern definition surface for tags is not
+  exposed yet.
 - Vendored Wasmtime version: `v44.0.1`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
 
@@ -75,13 +77,18 @@ Prefer `WasmtimeRuntime` when values cross Swift concurrency domains. It keeps
 store-bound Wasmtime handles inside an actor and serializes access to the store.
 
 The lower-level wrappers mirror Wasmtime's C API more directly. `Config`,
-`Store`, `Instance`, `Linker`, `Func`, `WasiConfig`, and `Caller` are not
-`Sendable`; keep each store-bound object graph on one serialized execution path
-and do not call into it concurrently.
+`Store`, `Instance`, `InstancePre`, `Linker`, `Func`, `WasiConfig`, and
+`Caller` are not `Sendable`; keep each store-bound object graph on one
+serialized execution path and do not call into it concurrently.
 
 Low-level handles should come from the same engine/store graph. For example, use
 a `Module` with a `Store` created from the same `Engine`, and use store-bound
 functions and instances only with the `Store` that owns them.
+
+`InstancePre` is created by `Linker.instantiatePre(module:)` after import
+resolution has succeeded. It can instantiate into multiple compatible stores,
+but each returned `Instance` is still bound to the store passed to
+`InstancePre.instantiate(store:)`.
 
 `Config` and `WasiConfig` are consumed by `Engine.init(config:)` and
 `Store.setWasi(_:)` respectively. After consumption, using the same object again

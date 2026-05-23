@@ -24,6 +24,8 @@ visible before public release.
 - Core module compilation from WAT, bytes, and `Data`.
 - Direct and linker-based instantiation, linker cloning, and default function
   lookup for named modules.
+- Linker pre-instantiation with reusable `InstancePre` handles and module clone
+  inspection.
 - Exported core function lookup and checked scalar calls for `i32`, `i64`,
   `f32`, and `f64`.
 - Function signature introspection through `Func.type()` and `FunctionType`.
@@ -157,17 +159,16 @@ These should remain unimplemented until a strong Swift safety story exists.
 
 ### Core Linker APIs
 
-Missing linker surface:
+Covered low-level pre-instantiation surface:
 
 - `wasmtime_linker_instantiate_pre`
 - `wasmtime_instance_pre_instantiate`
 - `wasmtime_instance_pre_module`
 - `wasmtime_instance_pre_delete`
 
-Likely Swift shape:
+Remaining linker work:
 
-- `InstancePre` as a non-`Sendable` low-level wrapper.
-- Actor-managed pre-instantiation APIs only if they can preserve store safety.
+- Actor-managed pre-instantiation APIs, only if they can preserve store safety.
 
 ## P2 - Component Model Parity
 

@@ -1442,6 +1442,72 @@ import Testing
     try linker.defineWasi()
 }
 
+@Test func linkerPreInstantiatesModulesAndReusesThemAcrossStores() throws {
+    let engine = try Engine()
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "answer" (func $answer (result i32)))
+          (func (export "run") (result i32)
+            call $answer))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.defineFunction(module: "host", name: "answer", results: [.i32]) { _, _ in
+        [.i32(42)]
+    }
+
+    let pre = try linker.instantiatePre(module: module)
+    let firstStore = try Store(engine: engine)
+    let firstInstance = try pre.instantiate(store: firstStore)
+    #expect(try firstInstance.exportedFunction(named: "run").call() == [.i32(42)])
+
+    let secondStore = try Store(engine: engine)
+    let secondInstance = try pre.instantiate(store: secondStore)
+    #expect(try secondInstance.exportedFunction(named: "run").call() == [.i32(42)])
+
+    let clonedModule = try pre.module()
+    let clonedPre = try linker.instantiatePre(module: clonedModule)
+    let clonedInstance = try clonedPre.instantiate(store: Store(engine: engine))
+    #expect(try clonedInstance.exportedFunction(named: "run").call() == [.i32(42)])
+}
+
+@Test func linkerPreInstantiationReportsLinkErrorsAndStartTraps() throws {
+    let engine = try Engine()
+    let missingImportModule = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "missing" (func $missing))
+          (func (export "run")
+            call $missing))
+        """
+    )
+    let linker = try Linker(engine: engine)
+
+    try expectWasmtimeError {
+        _ = try linker.instantiatePre(module: missingImportModule)
+    }
+
+    let trapModule = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (func $start
+            unreachable)
+          (start $start))
+        """
+    )
+    let trapPre = try linker.instantiatePre(module: trapModule)
+    do {
+        _ = try trapPre.instantiate(store: Store(engine: engine))
+        Issue.record("expected start trap")
+    } catch WasmtimeError.trap(let trap) {
+        #expect(trap.description.contains("unreachable"))
+    }
+}
+
 @Test func linkerDefinesUnknownImportsAsTrapsAndDefaultValues() throws {
     let engine = try Engine()
     let store = try Store(engine: engine)

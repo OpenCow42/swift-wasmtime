@@ -1053,6 +1053,11 @@ public final class Module: @unchecked Sendable {
         self.raw = module
     }
 
+    init(engine: Engine, raw: OpaquePointer) {
+        self.engine = engine
+        self.raw = raw
+    }
+
     deinit {
         wasmtime_module_delete(raw)
     }
@@ -1210,6 +1215,40 @@ public final class Instance {
         }
 
         return memory
+    }
+}
+
+/// A linked core WebAssembly module ready for repeated store instantiation.
+///
+/// `InstancePre` is not `Sendable`. It owns Wasmtime pre-instantiation state
+/// produced by a `Linker`, and each `instantiate(store:)` call creates an
+/// `Instance` bound to the provided `Store`.
+public final class InstancePre {
+    private let engine: Engine
+    let raw: OpaquePointer
+
+    init(engine: Engine, raw: OpaquePointer) {
+        self.engine = engine
+        self.raw = raw
+    }
+
+    public func instantiate(store: Store) throws -> Instance {
+        var instance = wasmtime_instance_t()
+        var trap: OpaquePointer?
+        let error = wasmtime_instance_pre_instantiate(raw, store.context, &instance, &trap)
+        try WasmtimeError.throwIfNeeded(error, trap: trap)
+        return Instance(store: store, raw: instance)
+    }
+
+    public func module() throws -> Module {
+        guard let rawModule = wasmtime_instance_pre_module(raw) else { // coverage:ignore defensive C allocation failure
+            throw WasmtimeError.allocationFailed("wasmtime_instance_pre_module returned nil") // coverage:ignore defensive C allocation failure
+        }
+        return Module(engine: engine, raw: rawModule)
+    }
+
+    deinit {
+        wasmtime_instance_pre_delete(raw)
     }
 }
 
@@ -1560,6 +1599,16 @@ public final class Linker {
         let error = wasmtime_linker_instantiate(raw, store.context, module.raw, &instance, &trap)
         try WasmtimeError.throwIfNeeded(error, trap: trap)
         return Instance(store: store, raw: instance)
+    }
+
+    public func instantiatePre(module: Module) throws -> InstancePre {
+        var instancePre: OpaquePointer?
+        let error = wasmtime_linker_instantiate_pre(raw, module.raw, &instancePre)
+        try WasmtimeError.throwIfNeeded(error)
+        guard let instancePre else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_linker_instantiate_pre returned nil without an error") // coverage:ignore defensive C invariant
+        }
+        return InstancePre(engine: engine, raw: instancePre)
     }
 
     deinit {
