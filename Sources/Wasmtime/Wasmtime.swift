@@ -604,11 +604,25 @@ public struct RuntimeInstanceID: Sendable, Hashable, CustomStringConvertible {
     }
 }
 
+public struct RuntimeComponentInstanceID: Sendable, Hashable, CustomStringConvertible {
+    public let rawValue: Int
+
+    public init(rawValue: Int) {
+        self.rawValue = rawValue
+    }
+
+    public var description: String {
+        "runtime component instance \(rawValue)"
+    }
+}
+
 public actor WasmtimeRuntime {
     private let engine: Engine
     private let store: Store
     private var nextInstanceID = 0
     private var instances: [RuntimeInstanceID: Instance] = [:]
+    private var nextComponentInstanceID = 0
+    private var componentInstances: [RuntimeComponentInstanceID: ComponentInstance] = [:]
 
     public init(options: EngineOptions = EngineOptions()) throws {
         let engine = try Engine(options: options)
@@ -633,6 +647,26 @@ public actor WasmtimeRuntime {
         try Module(engine: engine, data: data)
     }
 
+    public func compileComponent(wat: String) throws -> Component {
+        try Component(engine: engine, wat: wat)
+    }
+
+    public func compileComponent(wasm: [UInt8]) throws -> Component {
+        try Component(engine: engine, wasm: wasm)
+    }
+
+    public func compileComponent(data: Data) throws -> Component {
+        try Component(engine: engine, data: data)
+    }
+
+    public func setWasi(_ options: WasiOptions = WasiOptions()) throws {
+        try store.setWasi(options.makeConfig())
+    }
+
+    public func setWasiHTTP() {
+        store.setWasiHTTP()
+    }
+
     public func instantiate(_ module: Module) throws -> RuntimeInstanceID {
         let instance = try Instance(store: store, module: module)
         let id = RuntimeInstanceID(rawValue: nextInstanceID)
@@ -653,6 +687,44 @@ public actor WasmtimeRuntime {
         try instantiate(compileModule(data: data))
     }
 
+    public func instantiateWithLinker(
+        _ module: Module,
+        allowsShadowing: Bool = false,
+        defineWasi: Bool = false
+    ) throws -> RuntimeInstanceID {
+        let linker = try Linker(engine: engine)
+        linker.allowsShadowing = allowsShadowing
+        if defineWasi {
+            try linker.defineWasi()
+        }
+        let instance = try linker.instantiate(store: store, module: module)
+        let id = RuntimeInstanceID(rawValue: nextInstanceID)
+        nextInstanceID += 1
+        instances[id] = instance
+        return id
+    }
+
+    public func instantiateComponent(
+        _ component: Component,
+        allowsShadowing: Bool = false,
+        addWasiP2: Bool = false,
+        addWasiHTTP: Bool = false
+    ) throws -> RuntimeComponentInstanceID {
+        let linker = try ComponentLinker(engine: engine)
+        linker.allowsShadowing = allowsShadowing
+        if addWasiP2 {
+            try linker.addWasiP2()
+        }
+        if addWasiHTTP {
+            try linker.addWasiHTTP()
+        }
+        let instance = try linker.instantiate(store: store, component: component)
+        let id = RuntimeComponentInstanceID(rawValue: nextComponentInstanceID)
+        nextComponentInstanceID += 1
+        componentInstances[id] = instance
+        return id
+    }
+
     public func call(
         _ functionName: String,
         in instanceID: RuntimeInstanceID,
@@ -662,6 +734,13 @@ public actor WasmtimeRuntime {
             throw WasmtimeError.missingRuntimeInstance(instanceID)
         }
         return try instance.exportedFunction(named: functionName).call(arguments)
+    }
+
+    public func call(_ functionName: String, in componentInstanceID: RuntimeComponentInstanceID) throws {
+        guard let instance = componentInstances[componentInstanceID] else {
+            throw WasmtimeError.missingRuntimeComponentInstance(componentInstanceID)
+        }
+        try instance.exportedFunction(named: functionName).call()
     }
 }
 
@@ -781,6 +860,108 @@ public final class WasiConfig {
     }
 }
 
+public struct WasiOptions: Sendable, Equatable {
+    public var arguments: [String]?
+    public var inheritArguments: Bool
+    public var environment: [String: String]?
+    public var inheritEnvironment: Bool
+    public var standardInputFile: String?
+    public var inheritStandardInput: Bool
+    public var standardOutputFile: String?
+    public var inheritStandardOutput: Bool
+    public var standardErrorFile: String?
+    public var inheritStandardError: Bool
+    public var preopenedDirectories: [WasiPreopenedDirectory]
+
+    public init(
+        arguments: [String]? = nil,
+        inheritArguments: Bool = false,
+        environment: [String: String]? = nil,
+        inheritEnvironment: Bool = false,
+        standardInputFile: String? = nil,
+        inheritStandardInput: Bool = false,
+        standardOutputFile: String? = nil,
+        inheritStandardOutput: Bool = false,
+        standardErrorFile: String? = nil,
+        inheritStandardError: Bool = false,
+        preopenedDirectories: [WasiPreopenedDirectory] = []
+    ) {
+        self.arguments = arguments
+        self.inheritArguments = inheritArguments
+        self.environment = environment
+        self.inheritEnvironment = inheritEnvironment
+        self.standardInputFile = standardInputFile
+        self.inheritStandardInput = inheritStandardInput
+        self.standardOutputFile = standardOutputFile
+        self.inheritStandardOutput = inheritStandardOutput
+        self.standardErrorFile = standardErrorFile
+        self.inheritStandardError = inheritStandardError
+        self.preopenedDirectories = preopenedDirectories
+    }
+
+    func makeConfig() throws -> WasiConfig {
+        let config = try WasiConfig()
+        if let arguments {
+            try config.setArguments(arguments)
+        }
+        if inheritArguments {
+            config.inheritArguments()
+        }
+        if let environment {
+            try config.setEnvironment(environment)
+        }
+        if inheritEnvironment {
+            config.inheritEnvironment()
+        }
+        if let standardInputFile {
+            try config.setStandardInputFile(standardInputFile)
+        }
+        if inheritStandardInput {
+            config.inheritStandardInput()
+        }
+        if let standardOutputFile {
+            try config.setStandardOutputFile(standardOutputFile)
+        }
+        if inheritStandardOutput {
+            config.inheritStandardOutput()
+        }
+        if let standardErrorFile {
+            try config.setStandardErrorFile(standardErrorFile)
+        }
+        if inheritStandardError {
+            config.inheritStandardError()
+        }
+        for directory in preopenedDirectories {
+            try config.preopenDirectory(
+                hostPath: directory.hostPath,
+                guestPath: directory.guestPath,
+                directoryPermissions: directory.directoryPermissions,
+                filePermissions: directory.filePermissions
+            )
+        }
+        return config
+    }
+}
+
+public struct WasiPreopenedDirectory: Sendable, Equatable {
+    public var hostPath: String
+    public var guestPath: String
+    public var directoryPermissions: WasiDirectoryPermissions
+    public var filePermissions: WasiFilePermissions
+
+    public init(
+        hostPath: String,
+        guestPath: String,
+        directoryPermissions: WasiDirectoryPermissions = [.read],
+        filePermissions: WasiFilePermissions = [.read]
+    ) {
+        self.hostPath = hostPath
+        self.guestPath = guestPath
+        self.directoryPermissions = directoryPermissions
+        self.filePermissions = filePermissions
+    }
+}
+
 public struct WasiDirectoryPermissions: OptionSet, Sendable, Hashable {
     public let rawValue: Int
 
@@ -882,6 +1063,7 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
     case allocationFailed(String)
     case missingExport(String)
     case missingRuntimeInstance(RuntimeInstanceID)
+    case missingRuntimeComponentInstance(RuntimeComponentInstanceID)
     case wrongExportKind(name: String, expected: String, actual: String)
     case unsupportedValueKind(Int)
     case wasiConfigurationFailed(String)
@@ -901,6 +1083,8 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
             return "missing export: \(name)"
         case .missingRuntimeInstance(let id):
             return "missing runtime instance: \(id.rawValue)"
+        case .missingRuntimeComponentInstance(let id):
+            return "missing runtime component instance: \(id.rawValue)"
         case .wrongExportKind(let name, let expected, let actual):
             return "export \(name) is \(actual), expected \(expected)"
         case .unsupportedValueKind(let kind):

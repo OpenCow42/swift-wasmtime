@@ -24,7 +24,8 @@ source target.
 - Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`, `Instance`,
   `Linker`, `Func`, `Value`, `Trap`, `WasmtimeError`, and `WasiConfig`.
 - Swift 6 thread-safe surface: `EngineOptions` for sendable engine
-  configuration and `WasmtimeRuntime` for actor-serialized store execution.
+  configuration, `WasiOptions` for sendable WASI configuration, and
+  `WasmtimeRuntime` for actor-serialized store execution.
 - Config knobs for component model, SIMD/relaxed SIMD, compilation strategy,
   Cranelift optimization/flags, target triples, trap handling, debug info,
   parallel compilation, and linear-memory reservation/guard sizing.
@@ -140,6 +141,28 @@ let instance = try await runtime.instantiate(
     """
 )
 let result = try await runtime.call("add", in: instance, arguments: [.i32(20), .i32(22)])
+```
+
+The actor runtime also exposes the package's WASI, linker, and early component
+workflows without leaking store-bound handles across concurrency domains:
+
+```swift
+let wasi = WasiOptions(
+    arguments: ["guest.wasm"],
+    environment: ["LOG": "debug"],
+    standardOutputFile: "/tmp/guest.stdout"
+)
+try await runtime.setWasi(wasi)
+
+let linked = try await runtime.instantiateWithLinker(module, defineWasi: true)
+try await runtime.call("_start", in: linked)
+
+let componentRuntime = try WasmtimeRuntime(
+    options: EngineOptions(isComponentModelEnabled: true)
+)
+let component = try await componentRuntime.compileComponent(wat: componentWat)
+let componentInstance = try await componentRuntime.instantiateComponent(component)
+try await componentRuntime.call("run", in: componentInstance)
 ```
 
 ## Version Tags

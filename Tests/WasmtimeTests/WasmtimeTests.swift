@@ -14,6 +14,9 @@ import Testing
     acceptsSendable(WasiDirectoryPermissions.read)
     acceptsSendable(WasiFilePermissions.read)
     acceptsSendable(RuntimeInstanceID(rawValue: 1))
+    acceptsSendable(RuntimeComponentInstanceID(rawValue: 1))
+    acceptsSendable(WasiOptions())
+    acceptsSendable(WasiPreopenedDirectory(hostPath: "/", guestPath: "/host"))
     acceptsSendable(Trap(message: "trap", code: nil))
     acceptsSendable(WasmtimeError.missingExport("missing"))
 }
@@ -229,6 +232,100 @@ import Testing
     )
 
     #expect(try await runtime.call("id", in: instance, arguments: [.i32(9)]) == [.i32(9)])
+}
+
+@Test func runtimeActorConfiguresWasiAndInstantiatesWithLinker() async throws {
+    let temporary = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
+    let sandbox = temporary.appendingPathComponent("sandbox", isDirectory: true)
+    let stdout = temporary.appendingPathComponent("stdout.txt")
+    let stderr = temporary.appendingPathComponent("stderr.txt")
+    let stdin = temporary.appendingPathComponent("stdin.txt")
+    try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+    FileManager.default.createFile(atPath: stdout.path, contents: Data())
+    FileManager.default.createFile(atPath: stderr.path, contents: Data())
+    try "stdin\n".write(to: stdin, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+
+    let allOptions = WasiOptions(
+        arguments: ["guest.wasm", "--flag"],
+        inheritArguments: true,
+        environment: ["A": "B"],
+        inheritEnvironment: true,
+        standardInputFile: stdin.path,
+        inheritStandardInput: true,
+        standardOutputFile: stdout.path,
+        inheritStandardOutput: true,
+        standardErrorFile: stderr.path,
+        inheritStandardError: true,
+        preopenedDirectories: [
+            WasiPreopenedDirectory(
+                hostPath: sandbox.path,
+                guestPath: "/sandbox",
+                directoryPermissions: [.read, .write],
+                filePermissions: [.read, .write]
+            )
+        ]
+    )
+    acceptsSendable(allOptions)
+    _ = try allOptions.makeConfig()
+
+    let runtime = try WasmtimeRuntime()
+    try await runtime.setWasi(WasiOptions(standardOutputFile: stdout.path))
+    let module = try await runtime.compileModule(
+        wat: """
+        (module
+          (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+          (memory 1)
+          (export "memory" (memory 0))
+          (data (i32.const 32) "runtime-wasi\\n")
+          (func (export "_start")
+            i32.const 0
+            i32.const 32
+            i32.store
+            i32.const 4
+            i32.const 13
+            i32.store
+            i32.const 1
+            i32.const 0
+            i32.const 1
+            i32.const 16
+            call $fd_write
+            drop))
+        """
+    )
+    let instance = try await runtime.instantiateWithLinker(module, allowsShadowing: true, defineWasi: true)
+
+    #expect(try await runtime.call("_start", in: instance) == [])
+    #expect(try String(contentsOf: stdout, encoding: .utf8) == "runtime-wasi\n")
+}
+
+@Test func runtimeActorCompilesInstantiatesAndCallsComponents() async throws {
+    let runtime = try WasmtimeRuntime(options: EngineOptions(isComponentModelEnabled: true))
+    let componentBytes = try WasmText.compile(componentRunWat)
+    let compiledFromWat = try await runtime.compileComponent(wat: componentRunWat)
+    _ = try await runtime.compileComponent(wasm: componentBytes)
+    _ = try await runtime.compileComponent(data: Data(componentBytes))
+
+    try await runtime.setWasi()
+    await runtime.setWasiHTTP()
+    let instance = try await runtime.instantiateComponent(
+        compiledFromWat,
+        allowsShadowing: true,
+        addWasiP2: true,
+        addWasiHTTP: true
+    )
+    acceptsSendable(instance)
+    #expect(instance.description == "runtime component instance 0")
+
+    try await runtime.call("run", in: instance)
+
+    do {
+        try await runtime.call("run", in: RuntimeComponentInstanceID(rawValue: 999))
+        Issue.record("expected missing runtime component instance error")
+    } catch let error as WasmtimeError {
+        #expect(error == .missingRuntimeComponentInstance(RuntimeComponentInstanceID(rawValue: 999)))
+    }
 }
 
 @Test func callsScalarValueFunctions() throws {
@@ -590,6 +687,8 @@ import Testing
     #expect(WasmtimeError.missingExport("gone").description == "missing export: gone")
     #expect(RuntimeInstanceID(rawValue: 7).description == "runtime instance 7")
     #expect(WasmtimeError.missingRuntimeInstance(RuntimeInstanceID(rawValue: 7)).description == "missing runtime instance: 7")
+    #expect(RuntimeComponentInstanceID(rawValue: 8).description == "runtime component instance 8")
+    #expect(WasmtimeError.missingRuntimeComponentInstance(RuntimeComponentInstanceID(rawValue: 8)).description == "missing runtime component instance: 8")
     #expect(WasmtimeError.api(message: "bad", exitStatus: 2).description == "bad (WASI exit status 2)")
     #expect(WasmtimeError.api(message: "bad", exitStatus: nil).description == "bad")
     #expect(WasmtimeError.unsupportedValueKind(99).description == "unsupported Wasmtime value kind: 99")
