@@ -17,6 +17,9 @@ well tested.
   threads but forbids concurrent mutable access through aliasing contexts.
 - Keep `Engine`, `Module`, scalar values, traps, and errors `Sendable` where
   that remains sound.
+- Keep project-owned source files around 1,000 lines or less where practical.
+  Split code along elegant API and ownership boundaries before files become
+  difficult to review. Generated vendored files are exempt from this guideline.
 
 ## Verification Expectations
 
