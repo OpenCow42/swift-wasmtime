@@ -10,15 +10,23 @@ import Testing
     acceptsSendable(EngineOptions())
     acceptsSendable(CompilationStrategy.automatic)
     acceptsSendable(CraneliftOptimizationLevel.speed)
+    acceptsSendable(ValueKind.i32)
+    acceptsSendable(FunctionType(parameters: [.i32], results: [.i64]))
     acceptsSendable(Value.i32(1))
     acceptsSendable(WasiDirectoryPermissions.read)
     acceptsSendable(WasiFilePermissions.read)
     acceptsSendable(RuntimeInstanceID(rawValue: 1))
     acceptsSendable(RuntimeComponentInstanceID(rawValue: 1))
+    acceptsSendable(RuntimeHostFunction(module: "host", name: "answer", results: [.i32]) { _ in [.i32(42)] })
     acceptsSendable(WasiOptions())
     acceptsSendable(WasiPreopenedDirectory(hostPath: "/", guestPath: "/host"))
     acceptsSendable(Trap(message: "trap", code: nil))
     acceptsSendable(WasmtimeError.missingExport("missing"))
+
+    let emptyCaller = Caller(raw: nil)
+    #expect(emptyCaller.exportKind(named: "memory") == nil)
+    #expect(try emptyCaller.readMemory(offset: 0, length: 0) == nil)
+    #expect(try emptyCaller.writeMemory(offset: 0, bytes: []) == false)
 }
 
 @Test func compilesWatWasmBytesAndData() throws {
@@ -339,6 +347,32 @@ import Testing
     }
 }
 
+@Test func runtimeActorInstantiatesWithHostFunctions() async throws {
+    let runtime = try WasmtimeRuntime()
+    let module = try await runtime.compileModule(
+        wat: """
+        (module
+          (import "host" "double" (func $double (param i32) (result i32)))
+          (func (export "run") (result i32)
+            i32.const 21
+            call $double))
+        """
+    )
+    let instance = try await runtime.instantiateWithLinker(
+        module,
+        hostFunctions: [
+            RuntimeHostFunction(module: "host", name: "double", parameters: [.i32], results: [.i32]) { arguments in
+                guard case .i32(let value) = arguments[0] else {
+                    throw WasmtimeError.api(message: "unexpected argument", exitStatus: nil)
+                }
+                return [.i32(value * 2)]
+            },
+        ]
+    )
+
+    #expect(try await runtime.call("run", in: instance) == [.i32(42)])
+}
+
 @Test func runtimeActorCompilesInstantiatesAndCallsComponents() async throws {
     let runtime = try WasmtimeRuntime(options: EngineOptions(isComponentModelEnabled: true))
     let componentBytes = try WasmText.compile(componentRunWat)
@@ -582,6 +616,223 @@ import Testing
     try moduleLinker.defineModule(store: store, name: "provider", module: providerModule)
     let moduleConsumer = try moduleLinker.instantiate(store: store, module: consumerModule)
     #expect(try moduleConsumer.exportedFunction(named: "run").call() == [.i32(42)])
+}
+
+@Test func hostFunctionsCanBeCalledDirectlyAndLinkedAsStoreBoundExterns() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let add = try Func(store: store, parameters: [.i32, .i32], results: [.i32]) { _, arguments in
+        guard case .i32(let left) = arguments[0], case .i32(let right) = arguments[1] else {
+            throw WasmtimeError.api(message: "unexpected arguments", exitStatus: nil)
+        }
+        return [.i32(left + right)]
+    }
+
+    #expect(ValueKind.i32.description == "i32")
+    #expect(ValueKind.f32.description == "f32")
+    #expect(ValueKind.f64.description == "f64")
+    #expect(Value.i64(5).kind == .i64)
+    #expect(try add.call([.i32(20), .i32(22)]) == [.i32(42)])
+
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "add" (func $add (param i32 i32) (result i32)))
+          (func (export "run") (result i32)
+            i32.const 7
+            i32.const 8
+            call $add))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.define(store: store, module: "host", name: "add", function: add)
+    let instance = try linker.instantiate(store: store, module: module)
+
+    #expect(try instance.exportedFunction(named: "run").call() == [.i32(15)])
+}
+
+@Test func linkerDefinesStoreIndependentHostFunctions() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "math" "sum" (func $sum (param i32 i64 f32 f64) (result i32 i64 f32 f64)))
+          (func (export "run") (result i32 i64 f32 f64)
+            i32.const 40
+            i64.const 39
+            f32.const 1.5
+            f64.const 2.5
+            call $sum))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.defineFunction(
+        module: "math",
+        name: "sum",
+        type: FunctionType(parameters: [.i32, .i64, .f32, .f64], results: [.i32, .i64, .f32, .f64])
+    ) { _, arguments in
+        guard
+            case .i32(let int32) = arguments[0],
+            case .i64(let int64) = arguments[1],
+            case .f32(let float32) = arguments[2],
+            case .f64(let float64) = arguments[3]
+        else {
+            throw WasmtimeError.api(message: "unexpected arguments", exitStatus: nil)
+        }
+        return [.i32(int32 + 2), .i64(int64 + 3), .f32(float32 + 4), .f64(float64 + 5)]
+    }
+    try expectWasmtimeError {
+        try linker.defineFunction(module: "math", name: "sum", type: FunctionType()) { _, _ in [] }
+    }
+    let instance = try linker.instantiate(store: store, module: module)
+
+    #expect(try instance.exportedFunction(named: "run").call() == [.i32(42), .i64(42), .f32(5.5), .f64(7.5)])
+}
+
+@Test func hostFunctionsTrapWhenThrowingOrReturningInvalidResults() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let throwingModule = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "fail" (func $fail))
+          (func (export "run")
+            call $fail))
+        """
+    )
+    let throwingLinker = try Linker(engine: engine)
+    try throwingLinker.defineFunction(module: "host", name: "fail", type: FunctionType()) { _, _ in
+        throw WasmtimeError.api(message: "host failed", exitStatus: nil)
+    }
+    let throwingInstance = try throwingLinker.instantiate(store: store, module: throwingModule)
+    do {
+        _ = try throwingInstance.exportedFunction(named: "run").call()
+        Issue.record("expected host trap")
+    } catch WasmtimeError.api(let message, nil) {
+        #expect(message.contains("host failed"))
+    }
+
+    let wrongCountModule = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "wrong_count" (func $wrong_count (result i32)))
+          (func (export "run") (result i32)
+            call $wrong_count))
+        """
+    )
+    let wrongCountLinker = try Linker(engine: engine)
+    try wrongCountLinker.defineFunction(module: "host", name: "wrong_count", type: FunctionType(results: [.i32])) { _, _ in
+        []
+    }
+    let wrongCountInstance = try wrongCountLinker.instantiate(store: store, module: wrongCountModule)
+    do {
+        _ = try wrongCountInstance.exportedFunction(named: "run").call()
+        Issue.record("expected result count trap")
+    } catch WasmtimeError.api(let message, nil) {
+        #expect(message.contains("expected 1"))
+    }
+
+    let wrongKindLinker = try Linker(engine: engine)
+    try wrongKindLinker.defineFunction(module: "host", name: "wrong_count", type: FunctionType(results: [.i32])) { _, _ in
+        [.i64(1)]
+    }
+    let wrongKindInstance = try wrongKindLinker.instantiate(store: store, module: wrongCountModule)
+    do {
+        _ = try wrongKindInstance.exportedFunction(named: "run").call()
+        Issue.record("expected result kind trap")
+    } catch WasmtimeError.api(let message, nil) {
+        #expect(message.contains("expected i32"))
+    }
+}
+
+@Test func hostFunctionCallerReadsAndWritesExportedMemory() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "uppercase" (func $uppercase (param i32 i32) (result i32)))
+          (memory (export "memory") 1)
+          (data (i32.const 0) "hello")
+          (func (export "run") (result i32)
+            i32.const 0
+            i32.const 5
+            call $uppercase
+            drop
+            i32.const 0
+            i32.load8_u
+            i32.const 72
+            i32.eq))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.defineFunction(module: "host", name: "uppercase", parameters: [.i32, .i32], results: [.i32]) { caller, arguments in
+        #expect(caller.exportKind(named: "memory") == .memory)
+        #expect(caller.exportKind(named: "missing") == nil)
+        #expect(try caller.readMemory(named: "missing", offset: 0, length: 1) == nil)
+        #expect(try caller.writeMemory(named: "missing", offset: 0, bytes: [1]) == false)
+
+        guard case .i32(let offset) = arguments[0], case .i32(let length) = arguments[1] else {
+            throw WasmtimeError.api(message: "unexpected arguments", exitStatus: nil)
+        }
+        let input = try #require(try caller.readMemory(offset: Int(offset), length: Int(length)))
+        #expect(String(decoding: input, as: UTF8.self) == "hello")
+        let output = input.map { byte in
+            byte >= UInt8(ascii: "a") && byte <= UInt8(ascii: "z") ? byte - 32 : byte
+        }
+        #expect(try caller.writeMemory(offset: Int(offset), bytes: output))
+        return [.i32(length)]
+    }
+    let instance = try linker.instantiate(store: store, module: module)
+
+    #expect(try instance.exportedFunction(named: "run").call() == [.i32(1)])
+}
+
+@Test func hostFunctionCallerReportsMemoryBoundsErrors() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "read_oob" (func $read_oob))
+          (memory (export "memory") 1)
+          (func (export "run")
+            call $read_oob))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.defineFunction(module: "host", name: "read_oob", type: FunctionType()) { caller, _ in
+        try #expect(throws: WasmtimeError.memoryAccessOutOfBounds(offset: -1, length: 1, memorySize: 0)) {
+            _ = try caller.readMemory(offset: -1, length: 1)
+        }
+        try #expect(throws: WasmtimeError.memoryAccessOutOfBounds(offset: -1, length: 1, memorySize: 0)) {
+            _ = try caller.writeMemory(offset: -1, bytes: [1])
+        }
+        try #expect(throws: WasmtimeError.memoryAccessOutOfBounds(offset: 65536, length: 1, memorySize: 65536)) {
+            _ = try caller.writeMemory(offset: 65536, bytes: [1])
+        }
+        _ = try caller.readMemory(offset: 65536, length: 1)
+        return []
+    }
+    let instance = try linker.instantiate(store: store, module: module)
+
+    do {
+        _ = try instance.exportedFunction(named: "run").call()
+        Issue.record("expected memory bounds trap")
+    } catch WasmtimeError.api(let message, nil) {
+        #expect(message.contains("memory access out of bounds"))
+    }
+    #expect(
+        WasmtimeError.memoryAccessOutOfBounds(offset: 1, length: 2, memorySize: 3).description ==
+            "memory access out of bounds: offset 1, length 2, memory size 3"
+    )
 }
 
 @Test func componentLinkerInstantiatesAndCallsZeroParameterZeroResultFunctions() throws {

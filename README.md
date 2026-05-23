@@ -39,11 +39,11 @@ source target.
   calls for `i32`, `i64`, `f32`, and `f64`, trap/error conversion, and WASI
   configuration including arguments, environment, stdio files, stdin bytes,
   stdout/stderr callbacks, and preopened directories.
-- Linker support is intentionally narrow today: WASI registration, import
-  shadowing, defining unknown imports as traps or default values, defining an
-  instantiated module namespace, registering a module by name, and
-  instantiating modules through that linker. Arbitrary host functions and the
-  full low-level extern definition surface of Wasmtime's C API are not exposed
+- Linker support for WASI registration, import shadowing, host functions,
+  store-bound functions, defining unknown imports as traps or default values,
+  defining an instantiated module namespace, registering a module by name, and
+  instantiating modules through that linker. The remaining low-level extern
+  definition surface for globals, tables, memories, and tags is not exposed
   yet.
 - Vendored Wasmtime version: `v44.0.1`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
@@ -170,6 +170,23 @@ let linked = try await runtime.instantiateWithLinker(
     defineUnknownImportsAsDefaultValues: false
 )
 try await runtime.call("_start", in: linked)
+
+let hostBacked = try await runtime.instantiateWithLinker(
+    module,
+    hostFunctions: [
+        RuntimeHostFunction(
+            module: "host",
+            name: "double",
+            parameters: [.i32],
+            results: [.i32]
+        ) { arguments in
+            guard case .i32(let value) = arguments[0] else {
+                throw WasmtimeError.api(message: "unexpected argument", exitStatus: nil)
+            }
+            return [.i32(value * 2)]
+        },
+    ]
+)
 
 let componentRuntime = try WasmtimeRuntime(
     options: EngineOptions(isComponentModelEnabled: true)

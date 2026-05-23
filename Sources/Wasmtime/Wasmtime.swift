@@ -423,6 +423,86 @@ public final class Instance {
     }
 }
 
+public final class Caller {
+    private let raw: OpaquePointer?
+
+    init(raw: OpaquePointer?) {
+        self.raw = raw
+    }
+
+    public func exportKind(named name: String) -> ExternKind? {
+        guard let raw else {
+            return nil
+        }
+
+        var item = wasmtime_extern_t()
+        let found = name.withCString { cName in
+            wasmtime_caller_export_get(raw, cName, strlen(cName), &item)
+        }
+        guard found else {
+            return nil
+        }
+        defer { wasmtime_extern_delete(&item) }
+        return ExternKind(rawValue: item.kind)
+    }
+
+    public func readMemory(named name: String = "memory", offset: Int, length: Int) throws -> [UInt8]? {
+        guard offset >= 0, length >= 0 else {
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: length, memorySize: 0)
+        }
+        guard let raw, var memory = exportedMemory(named: name, caller: raw) else {
+            return nil
+        }
+        let context = wasmtime_caller_context(raw)
+        let memorySize = wasmtime_memory_data_size(context, &memory)
+        guard offset <= memorySize, length <= memorySize - offset else {
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: length, memorySize: memorySize)
+        }
+        guard let data = wasmtime_memory_data(context, &memory) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: length, memorySize: memorySize)
+        }
+        return Array(UnsafeBufferPointer(start: data.advanced(by: offset), count: length))
+    }
+
+    public func writeMemory(named name: String = "memory", offset: Int, bytes: [UInt8]) throws -> Bool {
+        guard offset >= 0 else {
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: bytes.count, memorySize: 0)
+        }
+        guard let raw, var memory = exportedMemory(named: name, caller: raw) else {
+            return false
+        }
+        let context = wasmtime_caller_context(raw)
+        let memorySize = wasmtime_memory_data_size(context, &memory)
+        guard offset <= memorySize, bytes.count <= memorySize - offset else {
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: bytes.count, memorySize: memorySize)
+        }
+        guard let data = wasmtime_memory_data(context, &memory) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: bytes.count, memorySize: memorySize)
+        }
+        bytes.withUnsafeBufferPointer { buffer in
+            if let baseAddress = buffer.baseAddress {
+                data.advanced(by: offset).update(from: baseAddress, count: buffer.count)
+            }
+        }
+        return true
+    }
+
+    private func exportedMemory(named name: String, caller: OpaquePointer) -> wasmtime_memory_t? {
+        var item = wasmtime_extern_t()
+        let found = name.withCString { cName in
+            wasmtime_caller_export_get(caller, cName, strlen(cName), &item)
+        }
+        guard found else {
+            return nil
+        }
+        defer { wasmtime_extern_delete(&item) }
+        guard item.kind == WASMTIME_EXTERN_MEMORY else { // coverage:ignore wasmtime_caller_export_get currently returns only memories
+            return nil // coverage:ignore wasmtime_caller_export_get currently returns only memories
+        }
+        return item.of.memory
+    }
+}
+
 public final class ComponentInstance {
     private let store: Store
     let raw: wasmtime_component_instance_t
@@ -498,6 +578,64 @@ public final class Linker {
         }
     }
 
+    public func define(store: Store, module: String, name: String, function: Func) throws {
+        var item = wasmtime_extern_t()
+        item.kind = wasmtime_extern_kind_t(WASMTIME_EXTERN_FUNC)
+        item.of.func = function.raw
+        try module.withCString { cModule in
+            try name.withCString { cName in
+                try WasmtimeError.throwIfNeeded(
+                    wasmtime_linker_define(raw, store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
+                )
+            }
+        }
+    }
+
+    public func defineFunction(
+        module: String,
+        name: String,
+        type: FunctionType,
+        _ body: @escaping HostFunction
+    ) throws {
+        let rawType = try type.makeRaw()
+        defer { wasm_functype_delete(rawType) }
+        let box = HostFunctionBox(type: type, body: body)
+        let data = Unmanaged.passRetained(box).toOpaque()
+        let error = module.withCString { cModule in
+            name.withCString { cName in
+                wasmtime_linker_define_func(
+                    raw,
+                    cModule,
+                    strlen(cModule),
+                    cName,
+                    strlen(cName),
+                    rawType,
+                    hostFunctionCallback,
+                    data,
+                    hostFunctionFinalizer
+                )
+            }
+        }
+        if let error {
+            throw WasmtimeError.fromOwned(error)
+        }
+    }
+
+    public func defineFunction(
+        module: String,
+        name: String,
+        parameters: [ValueKind] = [],
+        results: [ValueKind] = [],
+        _ body: @escaping HostFunction
+    ) throws {
+        try defineFunction(
+            module: module,
+            name: name,
+            type: FunctionType(parameters: parameters, results: results),
+            body
+        )
+    }
+
     public func instantiate(store: Store, module: Module) throws -> Instance {
         var instance = wasmtime_instance_t()
         var trap: OpaquePointer?
@@ -552,6 +690,37 @@ public final class ComponentLinker {
 public final class Func {
     private let store: Store
     let raw: wasmtime_func_t
+
+    public init(
+        store: Store,
+        type: FunctionType,
+        _ body: @escaping HostFunction
+    ) throws {
+        let rawType = try type.makeRaw()
+        defer { wasm_functype_delete(rawType) }
+        let box = HostFunctionBox(type: type, body: body)
+        let data = Unmanaged.passRetained(box).toOpaque()
+        var function = wasmtime_func_t()
+        wasmtime_func_new(
+            store.context,
+            rawType,
+            hostFunctionCallback,
+            data,
+            hostFunctionFinalizer,
+            &function
+        )
+        self.store = store
+        self.raw = function
+    }
+
+    public convenience init(
+        store: Store,
+        parameters: [ValueKind] = [],
+        results: [ValueKind] = [],
+        _ body: @escaping HostFunction
+    ) throws {
+        try self.init(store: store, type: FunctionType(parameters: parameters, results: results), body)
+    }
 
     init(store: Store, raw: wasmtime_func_t) {
         self.store = store
@@ -717,7 +886,8 @@ public actor WasmtimeRuntime {
         allowsShadowing: Bool = false,
         defineWasi: Bool = false,
         defineUnknownImportsAsTraps: Bool = false,
-        defineUnknownImportsAsDefaultValues: Bool = false
+        defineUnknownImportsAsDefaultValues: Bool = false,
+        hostFunctions: [RuntimeHostFunction] = []
     ) throws -> RuntimeInstanceID {
         let linker = try Linker(engine: engine)
         linker.allowsShadowing = allowsShadowing
@@ -729,6 +899,11 @@ public actor WasmtimeRuntime {
         }
         if defineUnknownImportsAsDefaultValues {
             try linker.defineUnknownImportsAsDefaultValues(store: store, module: module)
+        }
+        for function in hostFunctions {
+            try linker.defineFunction(module: function.module, name: function.name, type: function.type) { _, arguments in
+                try function.body(arguments)
+            }
         }
         let instance = try linker.instantiate(store: store, module: module)
         let id = RuntimeInstanceID(rawValue: nextInstanceID)
@@ -1059,6 +1234,71 @@ public struct WasiFilePermissions: OptionSet, Sendable, Hashable {
     public static let write = Self(rawValue: Int(WASMTIME_WASI_FILE_PERMS_WRITE.rawValue))
 }
 
+public enum ValueKind: Sendable, Equatable, CustomStringConvertible {
+    case i32
+    case i64
+    case f32
+    case f64
+
+    var wasmRawValue: wasm_valkind_t {
+        switch self {
+        case .i32: wasm_valkind_t(WASM_I32.rawValue)
+        case .i64: wasm_valkind_t(WASM_I64.rawValue)
+        case .f32: wasm_valkind_t(WASM_F32.rawValue)
+        case .f64: wasm_valkind_t(WASM_F64.rawValue)
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .i32: "i32"
+        case .i64: "i64"
+        case .f32: "f32"
+        case .f64: "f64"
+        }
+    }
+}
+
+public struct FunctionType: Sendable, Equatable {
+    public var parameters: [ValueKind]
+    public var results: [ValueKind]
+
+    public init(parameters: [ValueKind] = [], results: [ValueKind] = []) {
+        self.parameters = parameters
+        self.results = results
+    }
+
+    func makeRaw() throws -> OpaquePointer {
+        var params = try Self.makeValueTypeVector(parameters)
+        var results = try Self.makeValueTypeVector(results)
+        guard let type = wasm_functype_new(&params, &results) else { // coverage:ignore defensive C allocation failure
+            wasm_valtype_vec_delete(&params) // coverage:ignore defensive C allocation failure
+            wasm_valtype_vec_delete(&results) // coverage:ignore defensive C allocation failure
+            throw WasmtimeError.allocationFailed("wasm_functype_new returned nil") // coverage:ignore defensive C allocation failure
+        }
+        return type
+    }
+
+    private static func makeValueTypeVector(_ kinds: [ValueKind]) throws -> wasm_valtype_vec_t {
+        var vector = wasm_valtype_vec_t()
+        guard !kinds.isEmpty else {
+            wasm_valtype_vec_new_empty(&vector)
+            return vector
+        }
+
+        let types = try kinds.map { kind -> OpaquePointer? in
+            guard let raw = wasm_valtype_new(kind.wasmRawValue) else { // coverage:ignore defensive C allocation failure
+                throw WasmtimeError.allocationFailed("wasm_valtype_new returned nil") // coverage:ignore defensive C allocation failure
+            }
+            return raw
+        }
+        types.withUnsafeBufferPointer { buffer in
+            wasm_valtype_vec_new(&vector, buffer.count, buffer.baseAddress)
+        }
+        return vector
+    }
+}
+
 public enum Value: Sendable, Equatable, CustomStringConvertible {
     case i32(Int32)
     case i64(Int64)
@@ -1084,6 +1324,15 @@ public enum Value: Sendable, Equatable, CustomStringConvertible {
         return raw
     }
 
+    public var kind: ValueKind {
+        switch self {
+        case .i32: .i32
+        case .i64: .i64
+        case .f32: .f32
+        case .f64: .f64
+        }
+    }
+
     init(rawValue: wasmtime_val_t) throws {
         switch rawValue.kind {
         case wasmtime_valkind_t(WASMTIME_I32):
@@ -1106,6 +1355,38 @@ public enum Value: Sendable, Equatable, CustomStringConvertible {
         case .f32(let value): "f32(\(value))"
         case .f64(let value): "f64(\(value))"
         }
+    }
+}
+
+public typealias HostFunction = (_ caller: Caller, _ arguments: [Value]) throws -> [Value]
+public typealias SendableHostFunction = @Sendable (_ arguments: [Value]) throws -> [Value]
+
+public struct RuntimeHostFunction: Sendable {
+    public var module: String
+    public var name: String
+    public var type: FunctionType
+    public var body: SendableHostFunction
+
+    public init(
+        module: String,
+        name: String,
+        type: FunctionType,
+        body: @escaping SendableHostFunction
+    ) {
+        self.module = module
+        self.name = name
+        self.type = type
+        self.body = body
+    }
+
+    public init(
+        module: String,
+        name: String,
+        parameters: [ValueKind] = [],
+        results: [ValueKind] = [],
+        body: @escaping SendableHostFunction
+    ) {
+        self.init(module: module, name: name, type: FunctionType(parameters: parameters, results: results), body: body)
     }
 }
 
@@ -1142,6 +1423,7 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
     case wrongExportKind(name: String, expected: String, actual: String)
     case unsupportedValueKind(Int)
     case wasiConfigurationFailed(String)
+    case memoryAccessOutOfBounds(offset: Int, length: Int, memorySize: Int)
 
     public var description: String {
         switch self {
@@ -1164,6 +1446,8 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
             return "export \(name) is \(actual), expected \(expected)"
         case .unsupportedValueKind(let kind):
             return "unsupported Wasmtime value kind: \(kind)"
+        case .memoryAccessOutOfBounds(let offset, let length, let memorySize):
+            return "memory access out of bounds: offset \(offset), length \(length), memory size \(memorySize)"
         }
     }
 
@@ -1200,7 +1484,7 @@ public enum WasmText {
     }
 }
 
-enum ExternKind: CustomStringConvertible {
+public enum ExternKind: Sendable, Equatable, CustomStringConvertible {
     case function
     case global
     case table
@@ -1221,7 +1505,7 @@ enum ExternKind: CustomStringConvertible {
         }
     }
 
-    var description: String {
+    public var description: String {
         switch self {
         case .function: "func"
         case .global: "global"
@@ -1231,6 +1515,65 @@ enum ExternKind: CustomStringConvertible {
         case .tag: "tag"
         case .unknown(let value): "unknown(\(value))"
         }
+    }
+}
+
+private final class HostFunctionBox {
+    let type: FunctionType
+    let body: HostFunction
+
+    init(type: FunctionType, body: @escaping HostFunction) {
+        self.type = type
+        self.body = body
+    }
+}
+
+private let hostFunctionCallback: wasmtime_func_callback_t = { data, caller, args, nargs, results, nresults in
+    guard let data else {
+        return makeHostTrap("missing host function data") // coverage:ignore defensive C callback invariant
+    }
+
+    let box = Unmanaged<HostFunctionBox>.fromOpaque(data).takeUnretainedValue()
+    do {
+        let arguments = try convertHostArguments(args, count: nargs)
+        let values = try box.body(Caller(raw: caller), arguments)
+        guard values.count == nresults else {
+            return makeHostTrap("host function returned \(values.count) results, expected \(nresults)")
+        }
+        for (index, value) in values.enumerated() {
+            let expectedKind = box.type.results[index]
+            guard value.kind == expectedKind else {
+                return makeHostTrap("host function returned \(value.kind) at result \(index), expected \(expectedKind)")
+            }
+            results![index] = value.rawValue
+        }
+        return nil
+    } catch {
+        return makeHostTrap(String(describing: error))
+    }
+}
+
+private let hostFunctionFinalizer: (@convention(c) (UnsafeMutableRawPointer?) -> Void) = { data in
+    if let data {
+        Unmanaged<HostFunctionBox>.fromOpaque(data).release()
+    }
+}
+
+private func convertHostArguments(_ args: UnsafePointer<wasmtime_val_t>?, count: Int) throws -> [Value] {
+    guard count > 0 else {
+        return []
+    }
+    guard let args else { // coverage:ignore defensive C invariant
+        return []
+    }
+    return try (0..<count).map { index in
+        try Value(rawValue: args[index])
+    }
+}
+
+private func makeHostTrap(_ message: String) -> OpaquePointer? {
+    message.withCString { cMessage in
+        wasmtime_trap_new(cMessage, strlen(cMessage))
     }
 }
 
