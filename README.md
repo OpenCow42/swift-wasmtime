@@ -54,7 +54,8 @@ source target.
   table growth, linker-defined tables, function references, and null
   `funcref`/`externref` elements. Arbitrary non-null host `externref` payloads
   are intentionally deferred until broader reference value modeling exists.
-- General extern lookup through `Instance.export(named:)`, `Extern`, and
+- General extern lookup through `Instance.export(named:)`,
+  `Instance.export(at:)`, `Instance.exports()`, `Extern`, and
   `Linker.get(store:module:name:)`. Functions, globals, tables, and memories
   have first-class wrappers today; tags and shared memories are reported by
   kind until their dedicated wrappers land.

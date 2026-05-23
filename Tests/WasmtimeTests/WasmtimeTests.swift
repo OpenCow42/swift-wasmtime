@@ -596,6 +596,73 @@ import Testing
     }
 }
 
+@Test func instancesExposeExportsByIndexInExportOrder() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (func $answer (result i32) i32.const 42)
+          (global $global i32 (i32.const 7))
+          (table $table 1 funcref)
+          (memory $memory 1)
+          (export "answer" (func $answer))
+          (export "global" (global $global))
+          (export "table" (table $table))
+          (export "memory" (memory $memory)))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+
+    let function = try #require(try instance.export(at: 0))
+    #expect(function.name == "answer")
+    #expect(function.kind == .function)
+    switch function.extern {
+    case .function(let answer):
+        #expect(try answer.call() == [.i32(42)])
+    default:
+        Issue.record("expected function export")
+    }
+
+    let global = try #require(try instance.export(at: 1))
+    #expect(global.name == "global")
+    #expect(global.kind == .global)
+    switch global.extern {
+    case .global(let value):
+        #expect(try value.get() == .i32(7))
+    default:
+        Issue.record("expected global export")
+    }
+
+    let table = try #require(try instance.export(at: 2))
+    #expect(table.name == "table")
+    #expect(table.kind == .table)
+    switch table.extern {
+    case .table(let table):
+        #expect(table.size == 1)
+    default:
+        Issue.record("expected table export")
+    }
+
+    let memory = try #require(try instance.export(at: 3))
+    #expect(memory.name == "memory")
+    #expect(memory.kind == .memory)
+    switch memory.extern {
+    case .memory(let memory):
+        #expect(memory.size == 1)
+    default:
+        Issue.record("expected memory export")
+    }
+
+    #expect(try instance.export(at: 4) == nil)
+    #expect(try instance.export(at: -1) == nil)
+
+    let exports = try instance.exports()
+    #expect(exports.map(\.name) == ["answer", "global", "table", "memory"])
+    #expect(exports.map(\.kind) == [.function, .global, .table, .memory])
+}
+
 @Test func tablesExposeTypeSizeNullElementsAndGrowth() throws {
     let engine = try Engine()
     let store = try Store(engine: engine)

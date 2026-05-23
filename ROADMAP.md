@@ -27,9 +27,10 @@ visible before public release.
   `f32`, and `f64`.
 - Host functions through `Func`, `Linker.defineFunction`, and
   `RuntimeHostFunction`.
-- General extern lookup through `Extern`, `Instance.export(named:)`, and
-  `Linker.get(store:module:name:)`. Functions and memories have first-class
-  wrappers; unsupported externs preserve their `ExternKind`.
+- General extern lookup through `Extern`, `Instance.export(named:)`,
+  `Instance.export(at:)`, `Instance.exports()`, and
+  `Linker.get(store:module:name:)`. Functions, globals, tables, and memories
+  have first-class wrappers; unsupported externs preserve their `ExternKind`.
 - `Caller` export-kind lookup and exported-memory read/write helpers during
   host callback execution.
 - Linear memory types, host-created memories, exported memory lookup,
@@ -58,11 +59,11 @@ actor-isolated `WasmtimeRuntime` methods.
 
 ### General Extern Wrappers
 
-The package exposes generic extern lookup, but tags and shared memories do not
-have first-class safe wrappers yet.
+The package exposes generic extern lookup, including ordered instance export
+enumeration, but tags and shared memories do not have first-class safe wrappers
+yet.
 
 - Public `Linker.define` overloads for tags.
-- Public export-by-index support via `wasmtime_instance_export_nth`.
 - Shared-memory externs are tracked separately below.
 
 ### Globals

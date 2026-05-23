@@ -902,6 +902,24 @@ public enum Extern {
     }
 }
 
+/// Store-bound export item returned when enumerating an instance's exports.
+///
+/// The `extern` value follows the same store-bound ownership rules as values
+/// returned by `Instance.export(named:)`.
+public struct InstanceExport {
+    public let name: String
+    public let extern: Extern
+
+    public var kind: ExternKind {
+        extern.kind
+    }
+
+    init(name: String, extern: Extern) {
+        self.name = name
+        self.extern = extern
+    }
+}
+
 /// Action to take after an epoch deadline callback fires.
 public enum EpochDeadlineAction: Sendable, Equatable {
     /// Continue execution and set the next relative deadline.
@@ -1113,6 +1131,49 @@ public final class Instance {
         defer { wasmtime_extern_delete(&item) }
 
         return Extern(store: store, raw: item)
+    }
+
+    public func export(at index: Int) throws -> InstanceExport? {
+        guard index >= 0 else {
+            return nil
+        }
+
+        var item = wasmtime_extern_t()
+        var instance = raw
+        var rawName: UnsafeMutablePointer<CChar>?
+        var rawNameLength = 0
+        let found = wasmtime_instance_export_nth(
+            store.context,
+            &instance,
+            index,
+            &rawName,
+            &rawNameLength,
+            &item
+        )
+        guard found else {
+            return nil
+        }
+        defer { wasmtime_extern_delete(&item) }
+        guard let rawName else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_instance_export_nth returned nil export name") // coverage:ignore defensive C invariant
+        }
+
+        let nameBytes = UnsafeBufferPointer(
+            start: UnsafeRawPointer(rawName).assumingMemoryBound(to: UInt8.self),
+            count: rawNameLength
+        )
+        let name = String(decoding: nameBytes, as: UTF8.self)
+        return InstanceExport(name: name, extern: Extern(store: store, raw: item))
+    }
+
+    public func exports() throws -> [InstanceExport] {
+        var exports: [InstanceExport] = []
+        var index = 0
+        while let item = try export(at: index) {
+            exports.append(item)
+            index += 1
+        }
+        return exports
     }
 
     public func exportedFunction(named name: String) throws -> Func {
