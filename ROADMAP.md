@@ -22,6 +22,8 @@ visible before public release.
 - Swift concurrency surface through `EngineOptions`, `WasiOptions`, and the
   `WasmtimeRuntime` actor.
 - Core module compilation from WAT, bytes, and `Data`.
+- Core module import/export type metadata through `Module.imports()` and
+  `Module.exports()`.
 - Direct and linker-based instantiation, linker cloning, and default function
   lookup for named modules.
 - Linker pre-instantiation with reusable `InstancePre` handles and module clone
@@ -142,7 +144,6 @@ The package can build function types and inspect `Func` signatures through
 
 Remaining function type gaps:
 
-- Module import/export type inspection integration.
 - Reference-typed function signatures, pending broader reference value modeling.
 
 ### Unchecked Calls
@@ -254,8 +255,6 @@ Related C API families:
 Missing module APIs:
 
 - `wasmtime_module_validate`
-- `wasmtime_module_imports`
-- `wasmtime_module_exports`
 - `wasmtime_module_serialize`
 - `wasmtime_module_deserialize`
 - `wasmtime_module_deserialize_file`

@@ -21,7 +21,8 @@ source target.
 
 ## Current Scope
 
-- Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`, `Instance`,
+- Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`,
+  `ModuleImport`, `ModuleExport`, `ModuleExternType`, `Instance`,
   `InstancePre`, `Linker`, `Extern`, `Func`, `GlobalType`, `Global`,
   `TableElementKind`, `TableElement`, `TableType`, `Table`, `MemoryType`,
   `Memory`, `Value`, `Trap`, `WasmtimeError`, and `WasiConfig`.
@@ -40,7 +41,8 @@ source target.
   registering WASIp2/WASI HTTP host interfaces, instantiating components, and
   calling zero-parameter, zero-result component functions.
 - Module compilation from Wasm bytes, `Data`, or WAT text via Wasmtime's
-  `wat2wasm` C API.
+  `wat2wasm` C API, plus import/export type metadata inspection for functions,
+  globals, tables, and memories.
 - Direct instantiation, linker instantiation, exported function lookup, scalar
   calls for `i32`, `i64`, `f32`, and `f64`, function signature introspection,
   trap/error conversion, and WASI configuration including arguments,

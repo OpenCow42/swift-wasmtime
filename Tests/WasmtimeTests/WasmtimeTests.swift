@@ -29,6 +29,12 @@ import Testing
     acceptsSendable(WasiPreopenedDirectory(hostPath: "/", guestPath: "/host"))
     acceptsSendable(Trap(message: "trap", code: nil))
     acceptsSendable(WasmtimeError.missingExport("missing"))
+    acceptsSendable(ModuleGlobalType(content: .i32))
+    acceptsSendable(ModuleTableType(minimumElements: 0))
+    acceptsSendable(ModuleMemoryType(minimumPages: 0))
+    acceptsSendable(ModuleExternType.function(FunctionType()))
+    acceptsSendable(ModuleImport(module: "host", name: "run", type: .function(FunctionType())))
+    acceptsSendable(ModuleExport(name: "run", type: .function(FunctionType())))
 
     let emptyCaller = Caller(raw: nil)
     #expect(try emptyCaller.exportKind(named: "memory") == nil)
@@ -46,7 +52,71 @@ import Testing
     let dataModule = try Module(engine: engine, data: Data(wasm))
     acceptsSendable(dataModule)
 
-    _ = try Module(engine: engine, wat: "(module)")
+    let emptyModule = try Module(engine: engine, wat: "(module)")
+    #expect(try emptyModule.imports().isEmpty)
+    #expect(try emptyModule.exports().isEmpty)
+}
+
+@Test func modulesExposeImportAndExportTypeMetadata() throws {
+    let engine = try Engine()
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "function" (func $imported_function (param i32 i64) (result f32)))
+          (import "host" "global" (global $imported_global (mut i32)))
+          (import "host" "table" (table $imported_table 2 4 funcref))
+          (import "host" "memory" (memory $imported_memory 1 3))
+          (func $exported_function (export "function") (param f64) (result i64)
+            i64.const 42)
+          (global $exported_global (export "global") i32 (i32.const 7))
+          (table $exported_table (export "table") 1 2 funcref)
+          (memory $exported_memory (export "memory") 1 2))
+        """
+    )
+
+    let imports = try module.imports()
+    #expect(imports.map(\.module) == ["host", "host", "host", "host"])
+    #expect(imports.map(\.name) == ["function", "global", "table", "memory"])
+    #expect(imports.map(\.kind) == [.function, .global, .table, .memory])
+    #expect(imports[0].type == .function(FunctionType(parameters: [.i32, .i64], results: [.f32])))
+    #expect(imports[1].type == .global(ModuleGlobalType(content: .i32, isMutable: true)))
+    #expect(imports[2].type == .table(ModuleTableType(element: .functionReference, minimumElements: 2, maximumElements: 4)))
+    #expect(imports[3].type == .memory(ModuleMemoryType(minimumPages: 1, maximumPages: 3)))
+
+    let exports = try module.exports()
+    #expect(exports.map(\.name) == ["function", "global", "table", "memory"])
+    #expect(exports.map(\.kind) == [.function, .global, .table, .memory])
+    #expect(exports[0].type == .function(FunctionType(parameters: [.f64], results: [.i64])))
+    #expect(exports[1].type == .global(ModuleGlobalType(content: .i32)))
+    #expect(exports[2].type == .table(ModuleTableType(element: .functionReference, minimumElements: 1, maximumElements: 2)))
+    #expect(exports[3].type == .memory(ModuleMemoryType(minimumPages: 1, maximumPages: 2)))
+}
+
+@Test func moduleTypeMetadataPreservesUnsupportedReferenceSignatures() throws {
+    let engine = try Engine()
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "takes_ref" (func (param funcref)))
+          (func (export "returns_ref") (result funcref)
+            ref.null func)
+          (global (export "ref_global") funcref (ref.null func)))
+        """
+    )
+
+    let imports = try module.imports()
+    #expect(imports.count == 1)
+    #expect(imports[0].module == "host")
+    #expect(imports[0].name == "takes_ref")
+    #expect(imports[0].type == .unsupported(.function))
+    #expect(imports[0].kind == .function)
+
+    let exports = try module.exports()
+    #expect(exports.map(\.name) == ["returns_ref", "ref_global"])
+    #expect(exports.map(\.type) == [.unsupported(.function), .unsupported(.global)])
+    #expect(exports.map(\.kind) == [.function, .global])
 }
 
 @Test func configExposesCompilerTargetMemoryAndTrapOptions() throws {
