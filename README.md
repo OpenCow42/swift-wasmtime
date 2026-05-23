@@ -23,6 +23,8 @@ source target.
 
 - Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`, `Instance`,
   `Linker`, `Func`, `Value`, `Trap`, `WasmtimeError`, and `WasiConfig`.
+- Swift 6 thread-safe surface: `EngineOptions` for sendable engine
+  configuration and `WasmtimeRuntime` for actor-serialized store execution.
 - Config knobs for component model, SIMD/relaxed SIMD, compilation strategy,
   Cranelift optimization/flags, target triples, trap handling, debug info,
   parallel compilation, and linear-memory reservation/guard sizing.
@@ -120,6 +122,24 @@ let module = try Module(
 let instance = try Instance(store: store, module: module)
 let add = try instance.exportedFunction(named: "add")
 let result = try add.call([.i32(20), .i32(22)])
+```
+
+For code that crosses Swift concurrency domains, prefer the actor runtime:
+
+```swift
+import Wasmtime
+
+let runtime = try WasmtimeRuntime()
+let instance = try await runtime.instantiate(
+    wat: """
+    (module
+      (func (export "add") (param i32 i32) (result i32)
+        local.get 0
+        local.get 1
+        i32.add))
+    """
+)
+let result = try await runtime.call("add", in: instance, arguments: [.i32(20), .i32(22)])
 ```
 
 ## Version Tags

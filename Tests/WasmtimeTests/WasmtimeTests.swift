@@ -7,12 +7,13 @@ import Testing
     let engine = try Engine()
     _ = try Store(engine: engine)
     acceptsSendable(engine)
-    acceptsSendable(try Config())
+    acceptsSendable(EngineOptions())
     acceptsSendable(CompilationStrategy.automatic)
     acceptsSendable(CraneliftOptimizationLevel.speed)
     acceptsSendable(Value.i32(1))
     acceptsSendable(WasiDirectoryPermissions.read)
     acceptsSendable(WasiFilePermissions.read)
+    acceptsSendable(RuntimeInstanceID(rawValue: 1))
     acceptsSendable(Trap(message: "trap", code: nil))
     acceptsSendable(WasmtimeError.missingExport("missing"))
 }
@@ -59,10 +60,56 @@ import Testing
     _ = try Engine(config: config)
 }
 
+@Test func engineOptionsBuildSendableConfiguredEngines() throws {
+    var options = EngineOptions(
+        isComponentModelEnabled: true,
+        isSIMDEnabled: true,
+        isRelaxedSIMDEnabled: true,
+        isRelaxedSIMDDeterministic: true,
+        strategy: .cranelift,
+        craneliftOptimizationLevel: .speedAndSize,
+        memoryMayMove: true,
+        signalsBasedTraps: true,
+        debugInfo: true,
+        parallelCompilation: false,
+        target: nativeTargetTriple,
+        memoryReservation: 1 << 32,
+        memoryGuardSize: 1 << 16,
+        memoryReservationForGrowth: 1 << 20
+    )
+    acceptsSendable(options)
+
+    _ = try Engine(options: options)
+
+    options.enableCraneliftFlag(nativeSIMDFlag)
+    options.setCraneliftFlag(nativeSIMDFlag, to: "true")
+    options.setMemoryReservation(1 << 32)
+    options.setMemoryGuardSize(1 << 16)
+    options.setMemoryReservationForGrowth(1 << 20)
+    #expect(options.enabledCraneliftFlags.contains(nativeSIMDFlag))
+    #expect(options.craneliftFlagValues[nativeSIMDFlag] == "true")
+    #expect(options.memoryReservation == 1 << 32)
+    #expect(options.memoryGuardSize == 1 << 16)
+    #expect(options.memoryReservationForGrowth == 1 << 20)
+
+    var flagOptions = EngineOptions(
+        enabledCraneliftFlags: [nativeSIMDFlag],
+        craneliftFlagValues: [nativeSIMDFlag: "true"]
+    )
+    flagOptions.enableCraneliftFlag(nativeSIMDFlag)
+    flagOptions.setCraneliftFlag(nativeSIMDFlag, to: "true")
+    let flagConfig = try Config()
+    try flagConfig.apply(flagOptions)
+}
+
 @Test func configReportsInvalidTargetsAndControlsSIMDCompilation() throws {
     let invalidTargetConfig = try Config()
     try expectWasmtimeError {
         try invalidTargetConfig.setTarget("definitely-not-a-real-target")
+    }
+
+    try expectWasmtimeError {
+        _ = try Engine(options: EngineOptions(target: "definitely-not-a-real-target"))
     }
 
     let simdDisabledConfig = try Config()
@@ -88,7 +135,6 @@ import Testing
 
     let config = try Config()
     config.isComponentModelEnabled = true
-    acceptsSendable(config)
     let engine = try Engine(config: config)
     let bytes = try WasmText.compile(componentRunWat)
 
@@ -133,6 +179,56 @@ import Testing
     let add = try instance.exportedFunction(named: "add")
 
     #expect(try add.call([.i32(20), .i32(22)]) == [.i32(42)])
+}
+
+@Test func runtimeActorCompilesInstantiatesAndCallsFunctions() async throws {
+    let runtime = try WasmtimeRuntime(options: EngineOptions())
+    let wat = """
+    (module
+      (func (export "add") (param i32 i32) (result i32)
+        local.get 0
+        local.get 1
+        i32.add)
+      (func (export "nothing")))
+    """
+    let wasm = try WasmText.compile(wat)
+    let compiledFromWat = try await runtime.compileModule(wat: wat)
+    _ = try await runtime.compileModule(wasm: wasm)
+    _ = try await runtime.compileModule(data: Data(wasm))
+
+    let directID = try await runtime.instantiate(compiledFromWat)
+    acceptsSendable(directID)
+    #expect(directID.description == "runtime instance 0")
+    #expect(try await runtime.call("add", in: directID, arguments: [.i32(20), .i32(22)]) == [.i32(42)])
+    #expect(try await runtime.call("nothing", in: directID) == [])
+
+    let watID = try await runtime.instantiate(wat: wat)
+    let wasmID = try await runtime.instantiate(wasm: wasm)
+    let dataID = try await runtime.instantiate(data: Data(wasm))
+
+    async let watResult = runtime.call("add", in: watID, arguments: [.i32(1), .i32(2)])
+    async let wasmResult = runtime.call("add", in: wasmID, arguments: [.i32(3), .i32(4)])
+    async let dataResult = runtime.call("add", in: dataID, arguments: [.i32(5), .i32(6)])
+    #expect(try await watResult == [.i32(3)])
+    #expect(try await wasmResult == [.i32(7)])
+    #expect(try await dataResult == [.i32(11)])
+
+    do {
+        _ = try await runtime.call("add", in: RuntimeInstanceID(rawValue: 999), arguments: [.i32(1), .i32(2)])
+        Issue.record("expected missing runtime instance error")
+    } catch let error as WasmtimeError {
+        #expect(error == .missingRuntimeInstance(RuntimeInstanceID(rawValue: 999)))
+    }
+}
+
+@Test func runtimeActorCanUseExistingEngine() async throws {
+    let engine = try Engine()
+    let runtime = try WasmtimeRuntime(engine: engine)
+    let instance = try await runtime.instantiate(
+        wat: "(module (func (export \"id\") (param i32) (result i32) local.get 0))"
+    )
+
+    #expect(try await runtime.call("id", in: instance, arguments: [.i32(9)]) == [.i32(9)])
 }
 
 @Test func callsScalarValueFunctions() throws {
@@ -492,6 +588,8 @@ import Testing
     #expect(WasmtimeError.trap(Trap(message: "boom", code: nil)).description == "boom")
     #expect(WasmtimeError.allocationFailed("nope").description == "nope")
     #expect(WasmtimeError.missingExport("gone").description == "missing export: gone")
+    #expect(RuntimeInstanceID(rawValue: 7).description == "runtime instance 7")
+    #expect(WasmtimeError.missingRuntimeInstance(RuntimeInstanceID(rawValue: 7)).description == "missing runtime instance: 7")
     #expect(WasmtimeError.api(message: "bad", exitStatus: 2).description == "bad (WASI exit status 2)")
     #expect(WasmtimeError.api(message: "bad", exitStatus: nil).description == "bad")
     #expect(WasmtimeError.unsupportedValueKind(99).description == "unsupported Wasmtime value kind: 99")

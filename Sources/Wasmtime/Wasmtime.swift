@@ -7,7 +7,7 @@ import Glibc
 import Darwin
 #endif
 
-public final class Config: @unchecked Sendable {
+public final class Config {
     private var raw: OpaquePointer?
 
     public init() throws {
@@ -127,6 +127,113 @@ public final class Config: @unchecked Sendable {
             wasm_config_delete(raw)
         }
     }
+
+    func apply(_ options: EngineOptions) throws {
+        isComponentModelEnabled = options.isComponentModelEnabled
+        isSIMDEnabled = options.isSIMDEnabled
+        isRelaxedSIMDEnabled = options.isRelaxedSIMDEnabled
+        isRelaxedSIMDDeterministic = options.isRelaxedSIMDDeterministic
+        strategy = options.strategy
+        craneliftOptimizationLevel = options.craneliftOptimizationLevel
+        memoryMayMove = options.memoryMayMove
+        signalsBasedTraps = options.signalsBasedTraps
+        debugInfo = options.debugInfo
+        parallelCompilation = options.parallelCompilation
+
+        if let target = options.target {
+            try setTarget(target)
+        }
+        for flag in options.enabledCraneliftFlags {
+            enableCraneliftFlag(flag)
+        }
+        for (flag, value) in options.craneliftFlagValues.sorted(by: { $0.key < $1.key }) {
+            setCraneliftFlag(flag, to: value)
+        }
+        if let memoryReservation = options.memoryReservation {
+            setMemoryReservation(memoryReservation)
+        }
+        if let memoryGuardSize = options.memoryGuardSize {
+            setMemoryGuardSize(memoryGuardSize)
+        }
+        if let memoryReservationForGrowth = options.memoryReservationForGrowth {
+            setMemoryReservationForGrowth(memoryReservationForGrowth)
+        }
+    }
+}
+
+public struct EngineOptions: Sendable, Equatable {
+    public var isComponentModelEnabled: Bool
+    public var isSIMDEnabled: Bool
+    public var isRelaxedSIMDEnabled: Bool
+    public var isRelaxedSIMDDeterministic: Bool
+    public var strategy: CompilationStrategy
+    public var craneliftOptimizationLevel: CraneliftOptimizationLevel
+    public var memoryMayMove: Bool
+    public var signalsBasedTraps: Bool
+    public var debugInfo: Bool
+    public var parallelCompilation: Bool
+    public var target: String?
+    public var enabledCraneliftFlags: [String]
+    public var craneliftFlagValues: [String: String]
+    public var memoryReservation: UInt64?
+    public var memoryGuardSize: UInt64?
+    public var memoryReservationForGrowth: UInt64?
+
+    public init(
+        isComponentModelEnabled: Bool = false,
+        isSIMDEnabled: Bool = false,
+        isRelaxedSIMDEnabled: Bool = false,
+        isRelaxedSIMDDeterministic: Bool = false,
+        strategy: CompilationStrategy = .automatic,
+        craneliftOptimizationLevel: CraneliftOptimizationLevel = .speed,
+        memoryMayMove: Bool = false,
+        signalsBasedTraps: Bool = true,
+        debugInfo: Bool = false,
+        parallelCompilation: Bool = true,
+        target: String? = nil,
+        enabledCraneliftFlags: [String] = [],
+        craneliftFlagValues: [String: String] = [:],
+        memoryReservation: UInt64? = nil,
+        memoryGuardSize: UInt64? = nil,
+        memoryReservationForGrowth: UInt64? = nil
+    ) {
+        self.isComponentModelEnabled = isComponentModelEnabled
+        self.isSIMDEnabled = isSIMDEnabled
+        self.isRelaxedSIMDEnabled = isRelaxedSIMDEnabled
+        self.isRelaxedSIMDDeterministic = isRelaxedSIMDDeterministic
+        self.strategy = strategy
+        self.craneliftOptimizationLevel = craneliftOptimizationLevel
+        self.memoryMayMove = memoryMayMove
+        self.signalsBasedTraps = signalsBasedTraps
+        self.debugInfo = debugInfo
+        self.parallelCompilation = parallelCompilation
+        self.target = target
+        self.enabledCraneliftFlags = enabledCraneliftFlags
+        self.craneliftFlagValues = craneliftFlagValues
+        self.memoryReservation = memoryReservation
+        self.memoryGuardSize = memoryGuardSize
+        self.memoryReservationForGrowth = memoryReservationForGrowth
+    }
+
+    public mutating func enableCraneliftFlag(_ flag: String) {
+        enabledCraneliftFlags.append(flag)
+    }
+
+    public mutating func setCraneliftFlag(_ flag: String, to value: String) {
+        craneliftFlagValues[flag] = value
+    }
+
+    public mutating func setMemoryReservation(_ bytes: UInt64) {
+        memoryReservation = bytes
+    }
+
+    public mutating func setMemoryGuardSize(_ bytes: UInt64) {
+        memoryGuardSize = bytes
+    }
+
+    public mutating func setMemoryReservationForGrowth(_ bytes: UInt64) {
+        memoryReservationForGrowth = bytes
+    }
 }
 
 public enum CompilationStrategy: Sendable, Equatable {
@@ -170,6 +277,12 @@ public final class Engine: @unchecked Sendable {
             throw WasmtimeError.allocationFailed("wasm_engine_new_with_config returned nil")
         }
         self.raw = raw
+    }
+
+    public convenience init(options: EngineOptions) throws {
+        let config = try Config()
+        try config.apply(options)
+        try self.init(config: config)
     }
 
     deinit {
@@ -479,6 +592,79 @@ public final class ComponentFunction {
     }
 }
 
+public struct RuntimeInstanceID: Sendable, Hashable, CustomStringConvertible {
+    public let rawValue: Int
+
+    public init(rawValue: Int) {
+        self.rawValue = rawValue
+    }
+
+    public var description: String {
+        "runtime instance \(rawValue)"
+    }
+}
+
+public actor WasmtimeRuntime {
+    private let engine: Engine
+    private let store: Store
+    private var nextInstanceID = 0
+    private var instances: [RuntimeInstanceID: Instance] = [:]
+
+    public init(options: EngineOptions = EngineOptions()) throws {
+        let engine = try Engine(options: options)
+        self.engine = engine
+        self.store = try Store(engine: engine)
+    }
+
+    public init(engine: Engine) throws {
+        self.engine = engine
+        self.store = try Store(engine: engine)
+    }
+
+    public func compileModule(wat: String) throws -> Module {
+        try Module(engine: engine, wat: wat)
+    }
+
+    public func compileModule(wasm: [UInt8]) throws -> Module {
+        try Module(engine: engine, wasm: wasm)
+    }
+
+    public func compileModule(data: Data) throws -> Module {
+        try Module(engine: engine, data: data)
+    }
+
+    public func instantiate(_ module: Module) throws -> RuntimeInstanceID {
+        let instance = try Instance(store: store, module: module)
+        let id = RuntimeInstanceID(rawValue: nextInstanceID)
+        nextInstanceID += 1
+        instances[id] = instance
+        return id
+    }
+
+    public func instantiate(wat: String) throws -> RuntimeInstanceID {
+        try instantiate(compileModule(wat: wat))
+    }
+
+    public func instantiate(wasm: [UInt8]) throws -> RuntimeInstanceID {
+        try instantiate(compileModule(wasm: wasm))
+    }
+
+    public func instantiate(data: Data) throws -> RuntimeInstanceID {
+        try instantiate(compileModule(data: data))
+    }
+
+    public func call(
+        _ functionName: String,
+        in instanceID: RuntimeInstanceID,
+        arguments: [Value] = []
+    ) throws -> [Value] {
+        guard let instance = instances[instanceID] else {
+            throw WasmtimeError.missingRuntimeInstance(instanceID)
+        }
+        return try instance.exportedFunction(named: functionName).call(arguments)
+    }
+}
+
 public final class WasiConfig {
     private var raw: OpaquePointer?
 
@@ -695,6 +881,7 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
     case trap(Trap)
     case allocationFailed(String)
     case missingExport(String)
+    case missingRuntimeInstance(RuntimeInstanceID)
     case wrongExportKind(name: String, expected: String, actual: String)
     case unsupportedValueKind(Int)
     case wasiConfigurationFailed(String)
@@ -712,6 +899,8 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
             return message
         case .missingExport(let name):
             return "missing export: \(name)"
+        case .missingRuntimeInstance(let id):
+            return "missing runtime instance: \(id.rawValue)"
         case .wrongExportKind(let name, let expected, let actual):
             return "export \(name) is \(actual), expected \(expected)"
         case .unsupportedValueKind(let kind):
