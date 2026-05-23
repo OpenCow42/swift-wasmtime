@@ -23,6 +23,92 @@ public final class Config: @unchecked Sendable {
         }
     }
 
+    public var isSIMDEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_simd_set(requiredRaw, isSIMDEnabled)
+        }
+    }
+
+    public var isRelaxedSIMDEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_relaxed_simd_set(requiredRaw, isRelaxedSIMDEnabled)
+        }
+    }
+
+    public var isRelaxedSIMDDeterministic: Bool = false {
+        didSet {
+            wasmtime_config_wasm_relaxed_simd_deterministic_set(requiredRaw, isRelaxedSIMDDeterministic)
+        }
+    }
+
+    public var strategy: CompilationStrategy = .automatic {
+        didSet {
+            wasmtime_config_strategy_set(requiredRaw, strategy.rawValue)
+        }
+    }
+
+    public var craneliftOptimizationLevel: CraneliftOptimizationLevel = .speed {
+        didSet {
+            wasmtime_config_cranelift_opt_level_set(requiredRaw, craneliftOptimizationLevel.rawValue)
+        }
+    }
+
+    public var memoryMayMove: Bool = false {
+        didSet {
+            wasmtime_config_memory_may_move_set(requiredRaw, memoryMayMove)
+        }
+    }
+
+    public var signalsBasedTraps: Bool = true {
+        didSet {
+            wasmtime_config_signals_based_traps_set(requiredRaw, signalsBasedTraps)
+        }
+    }
+
+    public var debugInfo: Bool = false {
+        didSet {
+            wasmtime_config_debug_info_set(requiredRaw, debugInfo)
+        }
+    }
+
+    public var parallelCompilation: Bool = true {
+        didSet {
+            wasmtime_config_parallel_compilation_set(requiredRaw, parallelCompilation)
+        }
+    }
+
+    public func setTarget(_ target: String) throws {
+        try target.withCString { cTarget in
+            try WasmtimeError.throwIfNeeded(wasmtime_config_target_set(requiredRaw, cTarget))
+        }
+    }
+
+    public func enableCraneliftFlag(_ flag: String) {
+        flag.withCString { cFlag in
+            wasmtime_config_cranelift_flag_enable(requiredRaw, cFlag)
+        }
+    }
+
+    public func setCraneliftFlag(_ flag: String, to value: String) {
+        flag.withCString { cFlag in
+            value.withCString { cValue in
+                wasmtime_config_cranelift_flag_set(requiredRaw, cFlag, cValue)
+            }
+        }
+    }
+
+    public func setMemoryReservation(_ bytes: UInt64) {
+        wasmtime_config_memory_reservation_set(requiredRaw, bytes)
+    }
+
+    public func setMemoryGuardSize(_ bytes: UInt64) {
+        wasmtime_config_memory_guard_size_set(requiredRaw, bytes)
+    }
+
+    public func setMemoryReservationForGrowth(_ bytes: UInt64) {
+        wasmtime_config_memory_reservation_for_growth_set(requiredRaw, bytes)
+    }
+
     func release() -> OpaquePointer {
         let current = requiredRaw
         raw = nil
@@ -39,6 +125,32 @@ public final class Config: @unchecked Sendable {
     deinit {
         if let raw {
             wasm_config_delete(raw)
+        }
+    }
+}
+
+public enum CompilationStrategy: Sendable, Equatable {
+    case automatic
+    case cranelift
+
+    var rawValue: wasmtime_strategy_t {
+        switch self {
+        case .automatic: wasmtime_strategy_t(WASMTIME_STRATEGY_AUTO.rawValue)
+        case .cranelift: wasmtime_strategy_t(WASMTIME_STRATEGY_CRANELIFT.rawValue)
+        }
+    }
+}
+
+public enum CraneliftOptimizationLevel: Sendable, Equatable {
+    case none
+    case speed
+    case speedAndSize
+
+    var rawValue: wasmtime_opt_level_t {
+        switch self {
+        case .none: wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_NONE.rawValue)
+        case .speed: wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED.rawValue)
+        case .speedAndSize: wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED_AND_SIZE.rawValue)
         }
     }
 }

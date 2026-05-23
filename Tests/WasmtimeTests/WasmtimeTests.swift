@@ -7,6 +7,9 @@ import Testing
     let engine = try Engine()
     _ = try Store(engine: engine)
     acceptsSendable(engine)
+    acceptsSendable(try Config())
+    acceptsSendable(CompilationStrategy.automatic)
+    acceptsSendable(CraneliftOptimizationLevel.speed)
     acceptsSendable(Value.i32(1))
     acceptsSendable(WasiDirectoryPermissions.read)
     acceptsSendable(WasiFilePermissions.read)
@@ -25,6 +28,56 @@ import Testing
     acceptsSendable(dataModule)
 
     _ = try Module(engine: engine, wat: "(module)")
+}
+
+@Test func configExposesCompilerTargetMemoryAndTrapOptions() throws {
+    let config = try Config()
+    config.strategy = .cranelift
+    config.craneliftOptimizationLevel = .speedAndSize
+    config.isSIMDEnabled = true
+    config.isRelaxedSIMDEnabled = true
+    config.isRelaxedSIMDDeterministic = true
+    config.debugInfo = true
+    config.parallelCompilation = false
+    config.memoryMayMove = true
+    config.signalsBasedTraps = true
+    config.setMemoryReservation(1 << 32)
+    config.setMemoryGuardSize(1 << 16)
+    config.setMemoryReservationForGrowth(1 << 20)
+    try config.setTarget(nativeTargetTriple)
+
+    let flagConfig = try Config()
+    flagConfig.enableCraneliftFlag(nativeSIMDFlag)
+    flagConfig.setCraneliftFlag(nativeSIMDFlag, to: "true")
+
+    #expect(CompilationStrategy.automatic.rawValue == wasmtime_strategy_t(WASMTIME_STRATEGY_AUTO.rawValue))
+    #expect(CompilationStrategy.cranelift.rawValue == wasmtime_strategy_t(WASMTIME_STRATEGY_CRANELIFT.rawValue))
+    #expect(CraneliftOptimizationLevel.none.rawValue == wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_NONE.rawValue))
+    #expect(CraneliftOptimizationLevel.speed.rawValue == wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED.rawValue))
+    #expect(CraneliftOptimizationLevel.speedAndSize.rawValue == wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED_AND_SIZE.rawValue))
+
+    _ = try Engine(config: config)
+}
+
+@Test func configReportsInvalidTargetsAndControlsSIMDCompilation() throws {
+    let invalidTargetConfig = try Config()
+    try expectWasmtimeError {
+        try invalidTargetConfig.setTarget("definitely-not-a-real-target")
+    }
+
+    let simdDisabledConfig = try Config()
+    simdDisabledConfig.isSIMDEnabled = false
+    simdDisabledConfig.isRelaxedSIMDEnabled = false
+    simdDisabledConfig.isRelaxedSIMDDeterministic = false
+    let simdDisabledEngine = try Engine(config: simdDisabledConfig)
+    try expectWasmtimeError {
+        _ = try Module(engine: simdDisabledEngine, wat: simdWat)
+    }
+
+    let simdEnabledConfig = try Config()
+    simdEnabledConfig.isSIMDEnabled = true
+    let simdEnabledEngine = try Engine(config: simdEnabledConfig)
+    _ = try Module(engine: simdEnabledEngine, wat: simdWat)
 }
 
 @Test func configEnablesComponentModelAndComponentsCompileFromWatBytesAndData() throws {
@@ -469,12 +522,42 @@ private func acceptsSendable<T: Sendable>(_ value: T) {
     _ = value
 }
 
+private let nativeSIMDFlag = {
+    #if arch(x86_64)
+    "has_sse2"
+    #elseif arch(arm64)
+    "has_neon"
+    #else
+    "is_pic"
+    #endif
+}()
+
+private let nativeTargetTriple = {
+    #if os(macOS) && arch(arm64)
+    "aarch64-apple-darwin"
+    #elseif os(macOS) && arch(x86_64)
+    "x86_64-apple-darwin"
+    #elseif os(Linux) && arch(arm64)
+    "aarch64-unknown-linux-gnu"
+    #elseif os(Linux) && arch(x86_64)
+    "x86_64-unknown-linux-gnu"
+    #else
+    "unknown"
+    #endif
+}()
+
 private let componentRunWat = """
 (component
   (core module $m
     (func (export "run")))
   (core instance $i (instantiate $m))
   (func (export "run") (canon lift (core func $i "run"))))
+"""
+
+private let simdWat = """
+(module
+  (func (export "simd") (result v128)
+    v128.const i32x4 1 2 3 4))
 """
 
 private func expectWasmtimeError(_ body: () throws -> Void) throws {

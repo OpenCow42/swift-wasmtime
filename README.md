@@ -8,6 +8,9 @@ small Swift 6 API, and keeps the C ownership rules explicit.
 
 - Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`, `Instance`,
   `Linker`, `Func`, `Value`, `Trap`, `WasmtimeError`, and `WasiConfig`.
+- Config knobs for component model, SIMD/relaxed SIMD, compilation strategy,
+  Cranelift optimization/flags, target triples, trap handling, debug info,
+  parallel compilation, and linear-memory reservation/guard sizing.
 - Early component-model wrappers: `Component`, `ComponentLinker`,
   `ComponentInstance`, and `ComponentFunction` for compiling components,
   registering WASIp2/WASI HTTP host interfaces, instantiating components, and
