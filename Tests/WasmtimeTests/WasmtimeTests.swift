@@ -28,6 +28,7 @@ import Testing
     acceptsSendable(WasiOptions())
     acceptsSendable(WasiPreopenedDirectory(hostPath: "/", guestPath: "/host"))
     acceptsSendable(Trap(message: "trap", code: nil))
+    acceptsSendable(TrapCode.unreachableCodeReached)
     acceptsSendable(WasmFrame(functionIndex: 0, functionOffset: 1, moduleOffset: 2))
     acceptsSendable(WasmTrace())
     acceptsSendable(WasmtimeError.missingExport("missing"))
@@ -1602,7 +1603,8 @@ import Testing
             return
         }
         #expect(trap.description.contains("unreachable"))
-        #expect(trap.code != nil)
+        #expect(trap.code == .unreachableCodeReached)
+        #expect(trap.rawCode == 9)
         #expect(!trap.trace.isEmpty)
         #expect(error.trace == trap.trace)
         let frame = try #require(trap.trace.frames.first)
@@ -2276,9 +2278,21 @@ import Testing
     #expect(Value.i64(2).description == "i64(2)")
     #expect(Value.f32(3).description == "f32(3.0)")
     #expect(Value.f64(4).description == "f64(4.0)")
-    #expect(Trap(message: "boom", code: 9).description == "boom (trap code 9)")
+    #expect(Trap(message: "boom", code: .unreachableCodeReached).description == "boom (trap code unreachable)")
+    #expect(Trap(message: "boom", rawCode: 9).code == .unreachableCodeReached)
+    #expect(Trap(message: "boom", rawCode: 9).rawCode == 9)
     #expect(Trap(message: "boom", code: nil).description == "boom")
     #expect(WasmtimeError.trap(Trap(message: "boom", code: nil)).description == "boom")
+    #expect(Trap.host(message: "host boom") == Trap(message: "host boom"))
+    #expect(Trap.instruction(code: .memoryOutOfBounds).description == "memory out of bounds (trap code memory out of bounds)")
+    #expect(WasmtimeError.hostTrap(message: "host boom").description == "host boom")
+    #expect(WasmtimeError.hostError(message: "host failed").description == "host failed")
+    #expect(WasmtimeError.hostError(message: "guest exited", exitStatus: 7).description == "guest exited (WASI exit status 7)")
+    #expect(TrapCode(rawValue: 255) == .unknown(255))
+    #expect(TrapCode.unknown(255).rawValue == 255)
+    #expect(TrapCode.unknown(255).description == "unknown(255)")
+    #expect(TrapCode.integerDivisionByZero.rawValue == 7)
+    #expect(TrapCode.integerDivisionByZero.description == "integer division by zero")
     let frame = WasmFrame(
         functionIndex: 3,
         functionOffset: 7,
@@ -2362,6 +2376,12 @@ import Testing
     #expect(swiftHostTrap.description.contains("host trap"))
     #expect(swiftHostTrap.origin == nil)
     #expect(swiftHostTrap.trace.isEmpty)
+
+    let codeTrap = try #require(wasmtime_trap_new_code(wasmtime_trap_code_t(WASMTIME_TRAP_CODE_MEMORY_OUT_OF_BOUNDS.rawValue)))
+    let swiftCodeTrap = Trap.fromOwned(codeTrap)
+    #expect(swiftCodeTrap.code == .memoryOutOfBounds)
+    #expect(swiftCodeTrap.rawCode == 1)
+    #expect(swiftCodeTrap.description.contains("memory out of bounds"))
 }
 
 private func acceptsSendable<T: Sendable>(_ value: T) {

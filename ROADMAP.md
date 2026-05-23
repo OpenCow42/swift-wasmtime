@@ -284,18 +284,17 @@ Missing component APIs:
 
 Missing diagnostics APIs:
 
-- `wasmtime_error_new`
-- `wasmtime_trap_new`
-- `wasmtime_trap_new_code`
 - `wasm_frame_copy`
 - `wasm_frame_instance`
 
 Likely Swift shape:
 
+- Raw Wasmtime error/trap constructors are intentionally not public today; use
+  Swift value helpers such as `Trap.host(message:)`,
+  `Trap.instruction(code:message:)`, `WasmtimeError.hostTrap(message:)`, and
+  `WasmtimeError.hostError(message:exitStatus:)`.
 - Consider whether frame instance identity or frame copying need a public surface,
   or whether immutable `WasmFrame` snapshots are enough.
-- Consider public helpers for creating host-side Wasmtime errors only when
-  needed by host callbacks.
 
 ## P3 - Configuration Completeness
 
