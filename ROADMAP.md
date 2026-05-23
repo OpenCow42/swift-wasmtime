@@ -22,7 +22,8 @@ visible before public release.
 - Swift concurrency surface through `EngineOptions`, `WasiOptions`, and the
   `WasmtimeRuntime` actor.
 - Core module compilation from WAT, bytes, and `Data`, validation of Wasm bytes
-  and `Data`, and shallow module cloning.
+  and `Data`, shallow module cloning, and trusted compiled-artifact
+  serialization/deserialization.
 - Core module import/export type metadata through `Module.imports()` and
   `Module.exports()`.
 - Direct and linker-based instantiation, linker cloning, and default function
@@ -255,13 +256,16 @@ Related C API families:
 
 Missing module APIs:
 
+- `wasmtime_module_image_range`
+
+Covered module APIs:
+
 - `wasmtime_module_serialize`
 - `wasmtime_module_deserialize`
 - `wasmtime_module_deserialize_file`
-- `wasmtime_module_image_range`
 
-The deserialize APIs must be documented as trusted-input only, matching
-Wasmtime's C API safety notes.
+The deserialize APIs are documented as trusted-input only, matching Wasmtime's C
+API safety notes.
 
 ### Component Artifacts
 

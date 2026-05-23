@@ -99,6 +99,74 @@ import Testing
     #expect(try instance.exportedFunction(named: "answer").call() == [.i32(42)])
 }
 
+@Test func moduleSerializationRoundTripsThroughBytesDataAndFile() throws {
+    let engine = try Engine()
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "value" (global i32))
+          (func (export "answer") (result i32)
+            global.get 0))
+        """
+    )
+
+    let serialized = try module.serialize()
+    #expect(!serialized.isEmpty)
+
+    let bytesModule = try Module.deserialize(engine: engine, serialized: serialized)
+    let dataModule = try Module.deserialize(engine: engine, data: Data(serialized))
+
+    let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent(".build", isDirectory: true)
+        .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let file = directory.appendingPathComponent("module.cwasm")
+    try Data(serialized).write(to: file)
+    let fileModule = try Module.deserializeFile(engine: engine, path: file.path)
+
+    #expect(try bytesModule.imports() == module.imports())
+    #expect(try bytesModule.exports() == module.exports())
+    #expect(try dataModule.imports() == module.imports())
+    #expect(try dataModule.exports() == module.exports())
+    #expect(try fileModule.imports() == module.imports())
+    #expect(try fileModule.exports() == module.exports())
+
+    let store = try Store(engine: engine)
+    let linker = try Linker(engine: engine)
+    let global = try Global(store: store, type: GlobalType(content: .i32), value: .i32(42))
+    try linker.define(module: "host", name: "value", global: global)
+
+    let instance = try linker.instantiate(store: store, module: bytesModule)
+    #expect(try instance.exportedFunction(named: "answer").call() == [.i32(42)])
+}
+
+@Test func moduleDeserializationRejectsInvalidArtifacts() throws {
+    let engine = try Engine()
+
+    try expectWasmtimeError {
+        _ = try Module.deserialize(engine: engine, serialized: [0, 1, 2, 3])
+    }
+
+    try expectWasmtimeError {
+        _ = try Module.deserialize(engine: engine, data: Data([0, 1, 2, 3]))
+    }
+
+    let directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent(".build", isDirectory: true)
+        .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let file = directory.appendingPathComponent("invalid.cwasm")
+    try Data([0, 1, 2, 3]).write(to: file)
+    try expectWasmtimeError {
+        _ = try Module.deserializeFile(engine: engine, path: file.path)
+    }
+}
+
 @Test func modulesExposeImportAndExportTypeMetadata() throws {
     let engine = try Engine()
     let module = try Module(

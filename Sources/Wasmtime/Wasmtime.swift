@@ -1275,6 +1275,77 @@ public final class Module: @unchecked Sendable {
         return Module(engine: engine, raw: clone)
     }
 
+    /// Serializes this compiled module into Wasmtime's native artifact format.
+    ///
+    /// The returned bytes are only suitable for
+    /// `Module.deserialize(engine:serialized:)` with a compatible Wasmtime
+    /// engine, version, target platform, and configuration.
+    public func serialize() throws -> [UInt8] {
+        var output = wasm_byte_vec_t()
+        try WasmtimeError.throwIfNeeded(wasmtime_module_serialize(raw, &output))
+        defer { wasm_byte_vec_delete(&output) }
+        return output.withUnsafeBytes { Array($0) }
+    }
+
+    /// Deserializes a compiled module artifact previously produced by Wasmtime.
+    ///
+    /// Only pass trusted bytes that were produced by `Module.serialize()` from
+    /// a compatible Wasmtime engine, version, target platform, and
+    /// configuration. Wasmtime's deserialize API is not safe for arbitrary
+    /// user-controlled input.
+    public static func deserialize(engine: Engine, serialized bytes: [UInt8]) throws -> Module {
+        var module: OpaquePointer?
+        let error = bytes.withUnsafeBufferPointer { buffer in
+            wasmtime_module_deserialize(engine.raw, buffer.baseAddress, buffer.count, &module)
+        }
+        try WasmtimeError.throwIfNeeded(error)
+        guard let module else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_module_deserialize returned nil without an error")
+        }
+        return Module(engine: engine, raw: module)
+    }
+
+    /// Deserializes a compiled module artifact from `Data`.
+    ///
+    /// Only pass trusted data that was produced by `Module.serialize()` from a
+    /// compatible Wasmtime engine, version, target platform, and configuration.
+    /// Wasmtime's deserialize API is not safe for arbitrary user-controlled
+    /// input.
+    public static func deserialize(engine: Engine, data: Data) throws -> Module {
+        try data.withUnsafeBytes { buffer in
+            var module: OpaquePointer?
+            let error = wasmtime_module_deserialize(
+                engine.raw,
+                buffer.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                buffer.count,
+                &module
+            )
+            try WasmtimeError.throwIfNeeded(error)
+            guard let module else { // coverage:ignore defensive C invariant
+                throw WasmtimeError.allocationFailed("wasmtime_module_deserialize returned nil without an error")
+            }
+            return Module(engine: engine, raw: module)
+        }
+    }
+
+    /// Deserializes a compiled module artifact from an on-disk file.
+    ///
+    /// Only point this at trusted files containing bytes produced by
+    /// `Module.serialize()` from a compatible Wasmtime engine, version, target
+    /// platform, and configuration. Wasmtime's deserialize API is not safe for
+    /// arbitrary user-controlled input.
+    public static func deserializeFile(engine: Engine, path: String) throws -> Module {
+        var module: OpaquePointer?
+        let error = path.withCString { path in
+            wasmtime_module_deserialize_file(engine.raw, path, &module)
+        }
+        try WasmtimeError.throwIfNeeded(error)
+        guard let module else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_module_deserialize_file returned nil without an error")
+        }
+        return Module(engine: engine, raw: module)
+    }
+
     public func imports() throws -> [ModuleImport] {
         var vector = wasm_importtype_vec_t()
         wasmtime_module_imports(raw, &vector)

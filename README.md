@@ -42,8 +42,9 @@ source target.
   calling zero-parameter, zero-result component functions.
 - Module compilation from Wasm bytes, `Data`, or WAT text via Wasmtime's
   `wat2wasm` C API, validation of Wasm bytes before compilation, shallow
-  module cloning, plus import/export type metadata inspection for functions,
-  globals, tables, and memories.
+  module cloning, compiled module serialization/deserialization artifacts, plus
+  import/export type metadata inspection for functions, globals, tables, and
+  memories.
 - Direct instantiation, linker instantiation, exported function lookup, scalar
   calls for `i32`, `i64`, `f32`, and `f64`, function signature introspection,
   trap/error conversion, and WASI configuration including arguments,
@@ -87,6 +88,12 @@ serialized execution path and do not call into it concurrently.
 Low-level handles should come from the same engine/store graph. For example, use
 a `Module` with a `Store` created from the same `Engine`, and use store-bound
 functions and instances only with the `Store` that owns them.
+
+`Module.deserialize(engine:serialized:)`, `Module.deserialize(engine:data:)`,
+and `Module.deserializeFile(engine:path:)` must only consume trusted artifacts
+previously produced by `Module.serialize()` for a compatible Wasmtime engine,
+version, target platform, and configuration. They are not safe APIs for loading
+arbitrary user-controlled bytes.
 
 `InstancePre` is created by `Linker.instantiatePre(module:)` after import
 resolution has succeeded. It can instantiate into multiple compatible stores,
