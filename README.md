@@ -4,6 +4,21 @@ Swift Wasmtime is a SwiftPM wrapper around the official Wasmtime C API. The
 package vendors Wasmtime C API libraries for macOS, Linux, and Windows, exposes a
 small Swift 6 API, and keeps the C ownership rules explicit.
 
+## Project Status
+
+This is a community build/test package, not an official Wasmtime distribution.
+It exists to explore a small, Swift-native API over Wasmtime while keeping usage
+from SwiftPM projects as straightforward as possible.
+
+The current vendoring model is intentionally pragmatic and somewhat subpar:
+Wasmtime is implemented in Rust and distributed to C consumers as prebuilt C API
+artifacts, while SwiftPM does not currently have a first-class cross-platform
+story for vendored Rust-built C ABI libraries. This package therefore vendors
+the official Wasmtime C API artifacts and uses linker search paths selected by
+platform and architecture. Ease of use from SwiftPM is important to this project,
+even though the packaging tradeoff is not as clean as a native SwiftPM C/C++
+source target.
+
 ## Current Scope
 
 - Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`, `Instance`,
@@ -22,6 +37,90 @@ small Swift 6 API, and keeps the C ownership rules explicit.
   WASI configuration including arguments, environment, stdio, and preopened
   directories.
 - Vendored Wasmtime version: `v44.0.1`.
+- Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
+
+## Importing From SwiftPM
+
+Add the package dependency and point your target at the vendored Wasmtime library
+directory in SwiftPM's checkout. This mirrors the workaround used by downstream
+SwiftPM packages that need to stay inside SwiftPM without XCFrameworks or a
+system Wasmtime install.
+
+SwiftPM may still warn about this package's own relative `Vendor/...` search
+path when it is built as a dependency; the consumer target search path below is
+the path that makes the final link step succeed.
+
+```swift
+// swift-tools-version: 6.3
+
+import PackageDescription
+
+#if os(macOS)
+let wasmtimeOS = "macos"
+#elseif os(Linux)
+let wasmtimeOS = "linux"
+#elseif os(Windows)
+let wasmtimeOS = "windows"
+#else
+#error("swift-wasmtime currently supports macOS, Linux, and Windows")
+#endif
+
+#if arch(arm64)
+let wasmtimeArch = "aarch64"
+#elseif arch(x86_64)
+let wasmtimeArch = "x86_64"
+#else
+#error("swift-wasmtime currently supports arm64 and x86_64")
+#endif
+
+let wasmtimeVersion = "v44.0.1"
+let wasmtimeLibraryPath = ".build/checkouts/swift-wasmtime/Vendor/Wasmtime/\(wasmtimeVersion)/\(wasmtimeArch)-\(wasmtimeOS)/lib"
+
+let package = Package(
+    name: "MyPackage",
+    dependencies: [
+        .package(
+            url: "https://github.com/OpenCow42/swift-wasmtime.git",
+            .upToNextMajor(from: "44.0.1")
+        ),
+    ],
+    targets: [
+        .target(
+            name: "MyTarget",
+            dependencies: [
+                .product(name: "Wasmtime", package: "swift-wasmtime"),
+            ],
+            linkerSettings: [
+                .unsafeFlags(["-L", wasmtimeLibraryPath]),
+            ]
+        ),
+    ],
+    swiftLanguageModes: [.v6]
+)
+```
+
+Then import and use the Swift module:
+
+```swift
+import Wasmtime
+
+let engine = try Engine()
+let store = try Store(engine: engine)
+let module = try Module(
+    engine: engine,
+    wat: """
+    (module
+      (func (export "add") (param i32 i32) (result i32)
+        local.get 0
+        local.get 1
+        i32.add))
+    """
+)
+
+let instance = try Instance(store: store, module: module)
+let add = try instance.exportedFunction(named: "add")
+let result = try add.call([.i32(20), .i32(22)])
+```
 
 ## Version Tags
 
