@@ -27,6 +27,9 @@ visible before public release.
   `f32`, and `f64`.
 - Host functions through `Func`, `Linker.defineFunction`, and
   `RuntimeHostFunction`.
+- General extern lookup through `Extern`, `Instance.export(named:)`, and
+  `Linker.get(store:module:name:)`. Functions and memories have first-class
+  wrappers; unsupported externs preserve their `ExternKind`.
 - `Caller` export-kind lookup and exported-memory read/write helpers during
   host callback execution.
 - Linear memory types, host-created memories, exported memory lookup,
@@ -55,12 +58,9 @@ actor-isolated `WasmtimeRuntime` methods.
 
 ### General Extern Wrappers
 
-The package currently exposes exported functions directly and memory access only
-through `Caller`. Wasmtime exposes a broader extern model.
+The package exposes generic extern lookup, but globals, tables, tags, and shared
+memories do not have first-class safe wrappers yet.
 
-- Public `Extern` wrapper.
-- Public typed exported extern lookup on `Instance`.
-- Public `Linker.get` wrapper.
 - Public `Linker.define` overloads for globals, tables, and tags.
 - Public export-by-index support via `wasmtime_instance_export_nth`.
 - Shared-memory externs are tracked separately below.
@@ -153,7 +153,6 @@ These should remain unimplemented until a strong Swift safety story exists.
 Missing linker surface:
 
 - `wasmtime_linker_clone`
-- `wasmtime_linker_get`
 - `wasmtime_linker_get_default`
 - `wasmtime_linker_instantiate_pre`
 - `wasmtime_instance_pre_instantiate`
@@ -163,7 +162,6 @@ Missing linker surface:
 Likely Swift shape:
 
 - `Linker.clone()`
-- `Linker.get(...) -> Extern?`
 - `Linker.defaultFunction(...) -> Func`
 - `InstancePre` as a non-`Sendable` low-level wrapper.
 - Actor-managed pre-instantiation APIs only if they can preserve store safety.

@@ -551,6 +551,35 @@ public final class Memory {
     }
 }
 
+/// Store-bound extern item exported by an instance or found in a linker.
+///
+/// Only functions and memories have first-class wrappers today. Other extern
+/// kinds are surfaced as `unsupported` until their safe Swift wrappers land.
+public enum Extern {
+    case function(Func)
+    case memory(Memory)
+    case unsupported(ExternKind)
+
+    public var kind: ExternKind {
+        switch self {
+        case .function: .function
+        case .memory: .memory
+        case .unsupported(let kind): kind
+        }
+    }
+
+    init(store: Store, raw item: wasmtime_extern_t) {
+        switch item.kind {
+        case wasmtime_extern_kind_t(WASMTIME_EXTERN_FUNC):
+            self = .function(Func(store: store, raw: item.of.func))
+        case wasmtime_extern_kind_t(WASMTIME_EXTERN_MEMORY):
+            self = .memory(Memory(store: store, raw: item.of.memory))
+        default:
+            self = .unsupported(ExternKind(rawValue: item.kind))
+        }
+    }
+}
+
 /// Action to take after an epoch deadline callback fires.
 public enum EpochDeadlineAction: Sendable, Equatable {
     /// Continue execution and set the next relative deadline.
@@ -750,7 +779,7 @@ public final class Instance {
         self.raw = raw
     }
 
-    public func exportedFunction(named name: String) throws -> Func {
+    public func export(named name: String) throws -> Extern {
         var item = wasmtime_extern_t()
         var instance = raw
         let found = name.withCString { cName in
@@ -761,29 +790,25 @@ public final class Instance {
         }
         defer { wasmtime_extern_delete(&item) }
 
-        guard item.kind == WASMTIME_EXTERN_FUNC else {
-            throw WasmtimeError.wrongExportKind(name: name, expected: "func", actual: ExternKind(rawValue: item.kind).description)
+        return Extern(store: store, raw: item)
+    }
+
+    public func exportedFunction(named name: String) throws -> Func {
+        let item = try export(named: name)
+        guard case .function(let function) = item else {
+            throw WasmtimeError.wrongExportKind(name: name, expected: "func", actual: item.kind.description)
         }
 
-        return Func(store: store, raw: item.of.func)
+        return function
     }
 
     public func exportedMemory(named name: String = "memory") throws -> Memory {
-        var item = wasmtime_extern_t()
-        var instance = raw
-        let found = name.withCString { cName in
-            wasmtime_instance_export_get(store.context, &instance, cName, strlen(cName), &item)
-        }
-        guard found else {
-            throw WasmtimeError.missingExport(name)
-        }
-        defer { wasmtime_extern_delete(&item) }
-
-        guard item.kind == WASMTIME_EXTERN_MEMORY else {
-            throw WasmtimeError.wrongExportKind(name: name, expected: "memory", actual: ExternKind(rawValue: item.kind).description)
+        let item = try export(named: name)
+        guard case .memory(let memory) = item else {
+            throw WasmtimeError.wrongExportKind(name: name, expected: "memory", actual: item.kind.description)
         }
 
-        return Memory(store: store, raw: item.of.memory)
+        return memory
     }
 }
 
@@ -952,6 +977,20 @@ public final class Linker {
 
     public func defineUnknownImportsAsDefaultValues(store: Store, module: Module) throws {
         try WasmtimeError.throwIfNeeded(wasmtime_linker_define_unknown_imports_as_default_values(raw, store.context, module.raw))
+    }
+
+    public func get(store: Store, module: String, name: String) -> Extern? {
+        var item = wasmtime_extern_t()
+        let found = module.withCString { cModule in
+            name.withCString { cName in
+                wasmtime_linker_get(raw, store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
+            }
+        }
+        guard found else {
+            return nil
+        }
+        defer { wasmtime_extern_delete(&item) }
+        return Extern(store: store, raw: item)
     }
 
     public func defineInstance(store: Store, name: String, instance: Instance) throws {
@@ -1417,6 +1456,13 @@ public actor WasmtimeRuntime {
             throw WasmtimeError.missingRuntimeInstance(instanceID)
         }
         return try instance.exportedFunction(named: functionName).call(arguments)
+    }
+
+    public func exportKind(named name: String, in instanceID: RuntimeInstanceID) throws -> ExternKind {
+        guard let instance = instances[instanceID] else {
+            throw WasmtimeError.missingRuntimeInstance(instanceID)
+        }
+        return try instance.export(named: name).kind
     }
 
     public func readMemory(

@@ -407,6 +407,48 @@ import Testing
     }
 }
 
+@Test func instancesExposeGenericExternsForFunctionsMemoriesAndUnsupportedKinds() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (func (export "answer") (result i32) i32.const 42)
+          (memory (export "memory") 1)
+          (global (export "global") i32 (i32.const 7)))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+
+    switch try instance.export(named: "answer") {
+    case .function(let function):
+        #expect(try function.call() == [.i32(42)])
+    default:
+        Issue.record("expected function extern")
+    }
+
+    switch try instance.export(named: "memory") {
+    case .memory(let memory):
+        #expect(memory.size == 1)
+    default:
+        Issue.record("expected memory extern")
+    }
+
+    let unsupported = try instance.export(named: "global")
+    #expect(unsupported.kind == .global)
+    switch unsupported {
+    case .unsupported(.global):
+        break
+    default:
+        Issue.record("expected unsupported global extern")
+    }
+
+    try expectSpecificError(.missingExport("missing")) {
+        _ = try instance.export(named: "missing")
+    }
+}
+
 @Test func linkerDefinesStoreBoundMemories() throws {
     let engine = try Engine()
     let store = try Store(engine: engine)
@@ -424,10 +466,47 @@ import Testing
     )
     let linker = try Linker(engine: engine)
     try linker.define(module: "host", name: "mem", memory: memory)
+    switch try #require(linker.get(store: store, module: "host", name: "mem")) {
+    case .memory(let linkedMemory):
+        #expect(linkedMemory.size == 1)
+    default:
+        Issue.record("expected memory extern")
+    }
+    #expect(linker.get(store: store, module: "host", name: "missing") == nil)
     let instance = try linker.instantiate(store: store, module: module)
 
     #expect(try instance.exportedFunction(named: "write").call() == [])
     #expect(try memory.read(offset: 0, length: 1) == [65])
+}
+
+@Test func linkerGetsFunctionAndInstanceExterns() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let linker = try Linker(engine: engine)
+    try linker.defineFunction(module: "host", name: "answer", results: [.i32]) { _, _ in
+        [.i32(42)]
+    }
+
+    switch try #require(linker.get(store: store, module: "host", name: "answer")) {
+    case .function(let function):
+        #expect(try function.call() == [.i32(42)])
+    default:
+        Issue.record("expected function extern")
+    }
+
+    let providerModule = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (global (export "global") i32 (i32.const 1))
+          (memory (export "memory") 1))
+        """
+    )
+    let provider = try Instance(store: store, module: providerModule)
+    try linker.defineInstance(store: store, name: "provider", instance: provider)
+
+    #expect(linker.get(store: store, module: "provider", name: "global")?.kind == .global)
+    #expect(linker.get(store: store, module: "provider", name: "memory")?.kind == .memory)
 }
 
 @Test func runtimeActorManagesExportedMemory() async throws {
@@ -441,6 +520,8 @@ import Testing
         """
     )
 
+    #expect(try await runtime.exportKind(named: "memory", in: instance) == .memory)
+    #expect(try await runtime.exportKind(named: "not-memory", in: instance) == .function)
     #expect(try await runtime.memorySize(in: instance) == 1)
     #expect(try await runtime.memoryDataSize(in: instance) == 65_536)
     #expect(try await runtime.readMemory(in: instance, offset: 16, length: 7) == Array("runtime".utf8))
@@ -451,6 +532,12 @@ import Testing
 
     do {
         _ = try await runtime.readMemory(in: RuntimeInstanceID(rawValue: 999), offset: 0, length: 1)
+        Issue.record("expected missing runtime instance")
+    } catch let error as WasmtimeError {
+        #expect(error == .missingRuntimeInstance(RuntimeInstanceID(rawValue: 999)))
+    }
+    do {
+        _ = try await runtime.exportKind(named: "memory", in: RuntimeInstanceID(rawValue: 999))
         Issue.record("expected missing runtime instance")
     } catch let error as WasmtimeError {
         #expect(error == .missingRuntimeInstance(RuntimeInstanceID(rawValue: 999)))
