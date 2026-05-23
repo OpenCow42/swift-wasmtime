@@ -28,7 +28,11 @@ source target.
   `WasmtimeRuntime` for actor-serialized store execution.
 - Config knobs for component model, SIMD/relaxed SIMD, compilation strategy,
   Cranelift optimization/flags, target triples, trap handling, debug info,
-  parallel compilation, and linear-memory reservation/guard sizing.
+  parallel compilation, linear-memory reservation/guard sizing, fuel
+  consumption, epoch interruption, and maximum Wasm stack size.
+- Resource-control APIs for fuel, epoch deadlines, epoch interruption callbacks,
+  store resource limits, explicit store GC, and engine epoch increments, exposed
+  both through low-level `Store`/`Engine` wrappers and `WasmtimeRuntime`.
 - Early component-model wrappers: `Component`, `ComponentLinker`,
   `ComponentInstance`, and `ComponentFunction` for compiling components,
   registering WASIp2/WASI HTTP host interfaces, instantiating components, and

@@ -7,7 +7,10 @@ import Testing
     let engine = try Engine()
     _ = try Store(engine: engine)
     acceptsSendable(engine)
+    acceptsSendable(InterruptionOptions())
     acceptsSendable(EngineOptions())
+    acceptsSendable(ResourceLimits())
+    acceptsSendable(EpochDeadlineAction.continue(ticksBeyondCurrent: 1))
     acceptsSendable(CompilationStrategy.automatic)
     acceptsSendable(CraneliftOptimizationLevel.speed)
     acceptsSendable(ValueKind.i32)
@@ -51,11 +54,14 @@ import Testing
     config.isRelaxedSIMDDeterministic = true
     config.debugInfo = true
     config.parallelCompilation = false
+    config.consumesFuel = true
+    config.usesEpochInterruption = true
     config.memoryMayMove = true
     config.signalsBasedTraps = true
     config.setMemoryReservation(1 << 32)
     config.setMemoryGuardSize(1 << 16)
     config.setMemoryReservationForGrowth(1 << 20)
+    config.setMaxWasmStack(1 << 20)
     try config.setTarget(nativeTargetTriple)
 
     let flagConfig = try Config()
@@ -86,11 +92,19 @@ import Testing
         target: nativeTargetTriple,
         memoryReservation: 1 << 32,
         memoryGuardSize: 1 << 16,
-        memoryReservationForGrowth: 1 << 20
+        memoryReservationForGrowth: 1 << 20,
+        interruption: InterruptionOptions(
+            consumesFuel: true,
+            usesEpochInterruption: true,
+            maxWasmStack: 1 << 20
+        )
     )
     acceptsSendable(options)
 
     _ = try Engine(options: options)
+    #expect(options.interruption.consumesFuel)
+    #expect(options.interruption.usesEpochInterruption)
+    #expect(options.interruption.maxWasmStack == 1 << 20)
 
     options.enableCraneliftFlag(nativeSIMDFlag)
     options.setCraneliftFlag(nativeSIMDFlag, to: "true")
@@ -111,6 +125,135 @@ import Testing
     flagOptions.setCraneliftFlag(nativeSIMDFlag, to: "true")
     let flagConfig = try Config()
     try flagConfig.apply(flagOptions)
+}
+
+@Test func storeResourceLimitsFuelEpochAndGarbageCollection() throws {
+    let disabledFuelStore = try Store(engine: Engine())
+    try expectWasmtimeError {
+        try disabledFuelStore.setFuel(1)
+    }
+    try expectWasmtimeError {
+        _ = try disabledFuelStore.fuel()
+    }
+
+    let config = try Config()
+    config.consumesFuel = true
+    config.usesEpochInterruption = true
+    let engine = try Engine(config: config)
+    let store = try Store(engine: engine)
+    store.setEpochDeadline(ticksBeyondCurrent: 1_000)
+    try store.collectGarbage()
+
+    try store.setFuel(10_000)
+    #expect(try store.fuel() == 10_000)
+
+    let module = try Module(engine: engine, wat: countedLoopWat)
+    let instance = try Instance(store: store, module: module)
+    let count = try instance.exportedFunction(named: "count")
+    #expect(try count.call([.i32(20)]) == [.i32(20)])
+    #expect(try store.fuel() < 10_000)
+
+    try store.setFuel(0)
+    try expectWasmtimeError {
+        _ = try count.call([.i32(1)])
+    }
+
+    try store.setFuel(10_000)
+    store.setEpochDeadline(ticksBeyondCurrent: 1)
+    engine.incrementEpoch()
+    try expectWasmtimeError {
+        _ = try count.call([.i32(1)])
+    }
+}
+
+@Test func storeResourceLimitsPreventFutureInstances() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    store.setResourceLimits(ResourceLimits(instances: 1))
+    let module = try Module(engine: engine, wat: "(module)")
+
+    _ = try Instance(store: store, module: module)
+    try expectWasmtimeError {
+        _ = try Instance(store: store, module: module)
+    }
+}
+
+@Test func epochDeadlineCallbacksCanContinueOrTerminateExecution() throws {
+    let continueConfig = try Config()
+    continueConfig.usesEpochInterruption = true
+    let continueEngine = try Engine(config: continueConfig)
+    let continueStore = try Store(engine: continueEngine)
+    let callbackCount = LockedInt()
+    continueStore.setEpochDeadline(ticksBeyondCurrent: 0)
+    continueStore.setEpochDeadlineCallback { currentDeadlineDelta in
+        #expect(currentDeadlineDelta == 0)
+        callbackCount.increment()
+        return .continue(ticksBeyondCurrent: 1_000)
+    }
+
+    let continueModule = try Module(engine: continueEngine, wat: countedLoopWat)
+    let continueInstance = try Instance(store: continueStore, module: continueModule)
+    #expect(try continueInstance.exportedFunction(named: "count").call([.i32(100)]) == [.i32(100)])
+    #expect(callbackCount.value() > 0)
+
+    let terminateConfig = try Config()
+    terminateConfig.usesEpochInterruption = true
+    let terminateEngine = try Engine(config: terminateConfig)
+    let terminateStore = try Store(engine: terminateEngine)
+    terminateStore.setEpochDeadline(ticksBeyondCurrent: 0)
+    terminateStore.setEpochDeadlineCallback { _ in
+        throw WasmtimeError.api(message: "deadline stopped", exitStatus: nil)
+    }
+    let terminateModule = try Module(engine: terminateEngine, wat: countedLoopWat)
+    let terminateInstance = try Instance(store: terminateStore, module: terminateModule)
+
+    do {
+        _ = try terminateInstance.exportedFunction(named: "count").call([.i32(100)])
+        Issue.record("expected epoch callback error")
+    } catch WasmtimeError.api(let message, nil) {
+        #expect(message.contains("deadline stopped"))
+    }
+}
+
+@Test func runtimeActorManagesResourceControls() async throws {
+    let runtime = try WasmtimeRuntime(
+        options: EngineOptions(interruption: InterruptionOptions(consumesFuel: true, usesEpochInterruption: true)),
+        resourceLimits: ResourceLimits(instances: 2)
+    )
+    await runtime.setEpochDeadline(ticksBeyondCurrent: 1_000)
+    try await runtime.collectGarbage()
+    try await runtime.setFuel(10_000)
+    #expect(try await runtime.fuel() == 10_000)
+
+    let module = try await runtime.compileModule(wat: countedLoopWat)
+    let instance = try await runtime.instantiate(module)
+    #expect(try await runtime.call("count", in: instance, arguments: [.i32(5)]) == [.i32(5)])
+    #expect(try await runtime.fuel() < 10_000)
+
+    await runtime.setEpochDeadline(ticksBeyondCurrent: 1)
+    await runtime.incrementEpoch()
+    do {
+        _ = try await runtime.call("count", in: instance, arguments: [.i32(1)])
+        Issue.record("expected epoch interruption error")
+    } catch let error as WasmtimeError {
+        #expect(!error.description.isEmpty)
+    }
+
+    let callbackRuntime = try WasmtimeRuntime(
+        options: EngineOptions(interruption: InterruptionOptions(usesEpochInterruption: true))
+    )
+    let callbackCount = LockedInt()
+    await callbackRuntime.setEpochDeadline(ticksBeyondCurrent: 0)
+    await callbackRuntime.setEpochDeadlineCallback { _ in
+        callbackCount.increment()
+        return .continue(ticksBeyondCurrent: 1_000)
+    }
+    let callbackInstance = try await callbackRuntime.instantiate(wat: countedLoopWat)
+    #expect(try await callbackRuntime.call("count", in: callbackInstance, arguments: [.i32(10)]) == [.i32(10)])
+    #expect(callbackCount.value() > 0)
+
+    let existingEngineRuntime = try WasmtimeRuntime(engine: Engine(), resourceLimits: ResourceLimits(instances: 1))
+    await existingEngineRuntime.setResourceLimits(ResourceLimits(instances: 2))
 }
 
 @Test func configReportsInvalidTargetsAndControlsSIMDCompilation() throws {
@@ -1182,6 +1325,23 @@ private final class LockedCallerBox: @unchecked Sendable {
     }
 }
 
+private final class LockedInt: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = 0
+
+    func increment() {
+        lock.withLock {
+            storage += 1
+        }
+    }
+
+    func value() -> Int {
+        lock.withLock {
+            storage
+        }
+    }
+}
+
 private let nativeSIMDFlag = {
     #if arch(x86_64)
     "has_sse2"
@@ -1222,6 +1382,29 @@ private let simdWat = """
 (module
   (func (export "simd") (result v128)
     v128.const i32x4 1 2 3 4))
+"""
+
+private let countedLoopWat = """
+(module
+  (func (export "count") (param $n i32) (result i32)
+    (local $acc i32)
+    block $exit
+      loop $loop
+        local.get $n
+        i32.eqz
+        br_if $exit
+        local.get $n
+        i32.const 1
+        i32.sub
+        local.set $n
+        local.get $acc
+        i32.const 1
+        i32.add
+        local.set $acc
+        br $loop
+      end
+    end
+    local.get $acc))
 """
 
 private let wasiStdioWat = """

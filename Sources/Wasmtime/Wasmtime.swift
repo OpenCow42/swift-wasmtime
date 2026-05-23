@@ -82,6 +82,18 @@ public final class Config {
         }
     }
 
+    public var consumesFuel: Bool = false {
+        didSet {
+            wasmtime_config_consume_fuel_set(requiredRaw, consumesFuel)
+        }
+    }
+
+    public var usesEpochInterruption: Bool = false {
+        didSet {
+            wasmtime_config_epoch_interruption_set(requiredRaw, usesEpochInterruption)
+        }
+    }
+
     public func setTarget(_ target: String) throws {
         try target.withCString { cTarget in
             try WasmtimeError.throwIfNeeded(wasmtime_config_target_set(requiredRaw, cTarget))
@@ -114,6 +126,10 @@ public final class Config {
         wasmtime_config_memory_reservation_for_growth_set(requiredRaw, bytes)
     }
 
+    public func setMaxWasmStack(_ bytes: Int) {
+        wasmtime_config_max_wasm_stack_set(requiredRaw, bytes)
+    }
+
     func release() -> OpaquePointer {
         let current = requiredRaw
         raw = nil
@@ -144,6 +160,8 @@ public final class Config {
         signalsBasedTraps = options.signalsBasedTraps
         debugInfo = options.debugInfo
         parallelCompilation = options.parallelCompilation
+        consumesFuel = options.interruption.consumesFuel
+        usesEpochInterruption = options.interruption.usesEpochInterruption
 
         if let target = options.target {
             try setTarget(target)
@@ -163,6 +181,29 @@ public final class Config {
         if let memoryReservationForGrowth = options.memoryReservationForGrowth {
             setMemoryReservationForGrowth(memoryReservationForGrowth)
         }
+        if let maxWasmStack = options.interruption.maxWasmStack {
+            setMaxWasmStack(maxWasmStack)
+        }
+    }
+}
+
+/// Sendable engine-level interruption configuration.
+///
+/// Fuel and epoch interruption must be enabled before the corresponding
+/// `Store` methods can control execution.
+public struct InterruptionOptions: Sendable, Equatable {
+    public var consumesFuel: Bool
+    public var usesEpochInterruption: Bool
+    public var maxWasmStack: Int?
+
+    public init(
+        consumesFuel: Bool = false,
+        usesEpochInterruption: Bool = false,
+        maxWasmStack: Int? = nil
+    ) {
+        self.consumesFuel = consumesFuel
+        self.usesEpochInterruption = usesEpochInterruption
+        self.maxWasmStack = maxWasmStack
     }
 }
 
@@ -187,6 +228,7 @@ public struct EngineOptions: Sendable, Equatable {
     public var memoryReservation: UInt64?
     public var memoryGuardSize: UInt64?
     public var memoryReservationForGrowth: UInt64?
+    public var interruption: InterruptionOptions
 
     public init(
         isComponentModelEnabled: Bool = false,
@@ -204,7 +246,8 @@ public struct EngineOptions: Sendable, Equatable {
         craneliftFlagValues: [String: String] = [:],
         memoryReservation: UInt64? = nil,
         memoryGuardSize: UInt64? = nil,
-        memoryReservationForGrowth: UInt64? = nil
+        memoryReservationForGrowth: UInt64? = nil,
+        interruption: InterruptionOptions = InterruptionOptions()
     ) {
         self.isComponentModelEnabled = isComponentModelEnabled
         self.isSIMDEnabled = isSIMDEnabled
@@ -222,6 +265,7 @@ public struct EngineOptions: Sendable, Equatable {
         self.memoryReservation = memoryReservation
         self.memoryGuardSize = memoryGuardSize
         self.memoryReservationForGrowth = memoryReservationForGrowth
+        self.interruption = interruption
     }
 
     public mutating func enableCraneliftFlag(_ flag: String) {
@@ -301,10 +345,57 @@ public final class Engine: @unchecked Sendable {
         try self.init(config: config)
     }
 
+    /// Increments this engine's epoch counter.
+    ///
+    /// Stores with epoch interruption enabled can use this to interrupt guest
+    /// code once their configured deadline has passed.
+    public func incrementEpoch() {
+        wasmtime_engine_increment_epoch(raw)
+    }
+
     deinit {
         wasm_engine_delete(raw)
     }
 }
+
+/// Store-level resource limits.
+///
+/// Each `nil` value keeps Wasmtime's default for that limit. Limits apply only
+/// to future resource creation or growth.
+public struct ResourceLimits: Sendable, Equatable {
+    public var memorySizeBytes: Int64?
+    public var tableElements: Int64?
+    public var instances: Int64?
+    public var tables: Int64?
+    public var memories: Int64?
+
+    public init(
+        memorySizeBytes: Int64? = nil,
+        tableElements: Int64? = nil,
+        instances: Int64? = nil,
+        tables: Int64? = nil,
+        memories: Int64? = nil
+    ) {
+        self.memorySizeBytes = memorySizeBytes
+        self.tableElements = tableElements
+        self.instances = instances
+        self.tables = tables
+        self.memories = memories
+    }
+}
+
+/// Action to take after an epoch deadline callback fires.
+public enum EpochDeadlineAction: Sendable, Equatable {
+    /// Continue execution and set the next relative deadline.
+    case `continue`(ticksBeyondCurrent: UInt64)
+}
+
+/// Handler used when a store reaches its configured epoch deadline.
+///
+/// Return `.continue(ticksBeyondCurrent:)` to continue execution. Throw to
+/// terminate execution with a Wasmtime error. Async yielding is intentionally
+/// not exposed until Wasmtime async support has a Swift API.
+public typealias EpochDeadlineHandler = @Sendable (_ currentDeadlineDelta: UInt64) throws -> EpochDeadlineAction
 
 /// Low-level Wasmtime store wrapper.
 ///
@@ -324,6 +415,55 @@ public final class Store {
         }
         self.engine = engine
         self.raw = raw
+    }
+
+    /// Applies resource limits to future resource creation and growth.
+    public func setResourceLimits(_ limits: ResourceLimits) {
+        wasmtime_store_limiter(
+            raw,
+            limits.memorySizeBytes ?? -1,
+            limits.tableElements ?? -1,
+            limits.instances ?? -1,
+            limits.tables ?? -1,
+            limits.memories ?? -1
+        )
+    }
+
+    /// Runs a garbage collection pass for GC-managed values in this store.
+    public func collectGarbage() throws {
+        try WasmtimeError.throwIfNeeded(wasmtime_context_gc(context))
+    }
+
+    /// Sets the fuel available to guest code in this store.
+    ///
+    /// Fuel consumption must be enabled on the engine configuration.
+    public func setFuel(_ fuel: UInt64) throws {
+        try WasmtimeError.throwIfNeeded(wasmtime_context_set_fuel(context, fuel))
+    }
+
+    /// Returns the fuel remaining for guest code in this store.
+    ///
+    /// Fuel consumption must be enabled on the engine configuration.
+    public func fuel() throws -> UInt64 {
+        var fuel: UInt64 = 0
+        try WasmtimeError.throwIfNeeded(wasmtime_context_get_fuel(context, &fuel))
+        return fuel
+    }
+
+    /// Sets the store-local epoch deadline relative to the engine's current epoch.
+    public func setEpochDeadline(ticksBeyondCurrent: UInt64) {
+        wasmtime_context_set_epoch_deadline(context, ticksBeyondCurrent)
+    }
+
+    /// Installs a callback invoked when guest code reaches this store's epoch deadline.
+    public func setEpochDeadlineCallback(_ callback: @escaping EpochDeadlineHandler) {
+        let box = Unmanaged.passRetained(EpochDeadlineCallbackBox(callback))
+        wasmtime_store_epoch_deadline_callback(
+            raw,
+            epochDeadlineCallback,
+            box.toOpaque(),
+            epochDeadlineCallbackFinalizer
+        )
     }
 
     /// Installs WASI configuration into this store.
@@ -917,15 +1057,21 @@ public actor WasmtimeRuntime {
     private var nextComponentInstanceID = 0
     private var componentInstances: [RuntimeComponentInstanceID: ComponentInstance] = [:]
 
-    public init(options: EngineOptions = EngineOptions()) throws {
+    public init(options: EngineOptions = EngineOptions(), resourceLimits: ResourceLimits? = nil) throws {
         let engine = try Engine(options: options)
         self.engine = engine
         self.store = try Store(engine: engine)
+        if let resourceLimits {
+            store.setResourceLimits(resourceLimits)
+        }
     }
 
-    public init(engine: Engine) throws {
+    public init(engine: Engine, resourceLimits: ResourceLimits? = nil) throws {
         self.engine = engine
         self.store = try Store(engine: engine)
+        if let resourceLimits {
+            store.setResourceLimits(resourceLimits)
+        }
     }
 
     public func compileModule(wat: String) throws -> Module {
@@ -958,6 +1104,34 @@ public actor WasmtimeRuntime {
 
     public func setWasiHTTP() {
         store.setWasiHTTP()
+    }
+
+    public func setResourceLimits(_ limits: ResourceLimits) {
+        store.setResourceLimits(limits)
+    }
+
+    public func collectGarbage() throws {
+        try store.collectGarbage()
+    }
+
+    public func setFuel(_ fuel: UInt64) throws {
+        try store.setFuel(fuel)
+    }
+
+    public func fuel() throws -> UInt64 {
+        try store.fuel()
+    }
+
+    public func setEpochDeadline(ticksBeyondCurrent: UInt64) {
+        store.setEpochDeadline(ticksBeyondCurrent: ticksBeyondCurrent)
+    }
+
+    public func setEpochDeadlineCallback(_ callback: @escaping EpochDeadlineHandler) {
+        store.setEpochDeadlineCallback(callback)
+    }
+
+    public func incrementEpoch() {
+        engine.incrementEpoch()
     }
 
     public func instantiate(_ module: Module) throws -> RuntimeInstanceID {
@@ -1663,6 +1837,14 @@ private final class HostFunctionBox {
     }
 }
 
+private final class EpochDeadlineCallbackBox {
+    let body: EpochDeadlineHandler
+
+    init(_ body: @escaping EpochDeadlineHandler) {
+        self.body = body
+    }
+}
+
 private final class CallerState {
     private let lock = NSLock()
     private var raw: OpaquePointer?
@@ -1722,6 +1904,39 @@ private let hostFunctionFinalizer: (@convention(c) (UnsafeMutableRawPointer?) ->
     }
 }
 
+private let epochDeadlineCallback:
+    (@convention(c) (
+        OpaquePointer?,
+        UnsafeMutableRawPointer?,
+        UnsafeMutablePointer<UInt64>?,
+        UnsafeMutablePointer<wasmtime_update_deadline_kind_t>?
+    ) -> OpaquePointer?) = { _, data, epochDeadlineDelta, updateKind in
+        guard let data else {
+            return makeHostError("missing epoch deadline callback data") // coverage:ignore defensive C callback invariant
+        }
+        guard let epochDeadlineDelta, let updateKind else {
+            return makeHostError("missing epoch deadline callback output") // coverage:ignore defensive C callback invariant
+        }
+
+        let box = Unmanaged<EpochDeadlineCallbackBox>.fromOpaque(data).takeUnretainedValue()
+        do {
+            switch try box.body(epochDeadlineDelta.pointee) {
+            case .continue(let ticksBeyondCurrent):
+                epochDeadlineDelta.pointee = ticksBeyondCurrent
+                updateKind.pointee = wasmtime_update_deadline_kind_t(WASMTIME_UPDATE_DEADLINE_CONTINUE)
+            }
+            return nil
+        } catch {
+            return makeHostError(String(describing: error))
+        }
+    }
+
+private let epochDeadlineCallbackFinalizer: (@convention(c) (UnsafeMutableRawPointer?) -> Void) = { data in
+    if let data {
+        Unmanaged<EpochDeadlineCallbackBox>.fromOpaque(data).release()
+    }
+}
+
 private func convertHostArguments(_ args: UnsafePointer<wasmtime_val_t>?, count: Int) throws -> [Value] {
     guard count > 0 else {
         return []
@@ -1737,6 +1952,12 @@ private func convertHostArguments(_ args: UnsafePointer<wasmtime_val_t>?, count:
 private func makeHostTrap(_ message: String) -> OpaquePointer? {
     message.withCString { cMessage in
         wasmtime_trap_new(cMessage, strlen(cMessage))
+    }
+}
+
+private func makeHostError(_ message: String) -> OpaquePointer? {
+    message.withCString { cMessage in
+        wasmtime_error_new(cMessage)
     }
 }
 

@@ -29,6 +29,9 @@ visible before public release.
   `RuntimeHostFunction`.
 - `Caller` export-kind lookup and exported-memory read/write helpers during
   host callback execution.
+- Resource controls for fuel, epoch deadlines, epoch deadline callbacks, store
+  resource limits, explicit store GC, engine epoch increments, and maximum Wasm
+  stack configuration.
 - WASI configuration from `wasi.h`: arguments, environment, inherited stdio,
   stdin bytes/files, stdout/stderr files, stdout/stderr callbacks, and preopened
   directories.
@@ -40,27 +43,10 @@ visible before public release.
 
 ## P1 - Public Embedding Safety
 
-### Resource Limits And Interruption
-
-Wasmtime exposes resource-control primitives that Swift Wasmtime does not wrap
-yet. This is the main remaining gap for safe public embedding.
-
-- `wasmtime_config_consume_fuel_set`
-- `wasmtime_context_set_fuel`
-- `wasmtime_context_get_fuel`
-- `wasmtime_config_epoch_interruption_set`
-- `wasmtime_engine_increment_epoch`
-- `wasmtime_context_set_epoch_deadline`
-- `wasmtime_store_epoch_deadline_callback`
-- `wasmtime_store_limiter`
-- `wasmtime_context_gc`
-
-Likely Swift shape:
-
-- Add sendable `ResourceLimits` and `InterruptionOptions` value types.
-- Add low-level `Store` methods for fuel, epoch deadlines, limits, and GC.
-- Add actor methods on `WasmtimeRuntime` so limits can be managed without
-  leaking store-bound handles.
+No P1 API coverage gaps are currently tracked. The initial public embedding
+safety gap, resource limits and interruption, is now covered by
+`InterruptionOptions`, `ResourceLimits`, low-level `Store`/`Engine` methods, and
+actor-isolated `WasmtimeRuntime` methods.
 
 ## P2 - Core Extern Coverage
 
@@ -339,9 +325,6 @@ Likely Swift shape:
 The current config surface is useful but incomplete. Missing config knobs:
 
 - `wasmtime_config_cache_config_load`
-- `wasmtime_config_consume_fuel_set`
-- `wasmtime_config_epoch_interruption_set`
-- `wasmtime_config_max_wasm_stack_set`
 - `wasmtime_config_wasm_threads_set`
 - `wasmtime_config_shared_memory_set`
 - `wasmtime_config_wasm_tail_call_set`
@@ -456,4 +439,3 @@ Potential areas:
 - Document any trusted-input requirements for deserialize APIs.
 - Document any unsafe/raw-pointer escape hatches separately from the main safe
   Swift API.
-
