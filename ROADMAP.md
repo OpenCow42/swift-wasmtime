@@ -29,6 +29,9 @@ visible before public release.
   `RuntimeHostFunction`.
 - `Caller` export-kind lookup and exported-memory read/write helpers during
   host callback execution.
+- Linear memory types, host-created memories, exported memory lookup,
+  store-bound memory imports in `Linker`, copy-based memory reads/writes,
+  memory growth, and actor-isolated memory helpers.
 - Resource controls for fuel, epoch deadlines, epoch deadline callbacks, store
   resource limits, explicit store GC, engine epoch increments, and maximum Wasm
   stack configuration.
@@ -58,31 +61,9 @@ through `Caller`. Wasmtime exposes a broader extern model.
 - Public `Extern` wrapper.
 - Public typed exported extern lookup on `Instance`.
 - Public `Linker.get` wrapper.
-- Public `Linker.define` overloads for supported extern types.
+- Public `Linker.define` overloads for globals, tables, and tags.
 - Public export-by-index support via `wasmtime_instance_export_nth`.
-
-### Linear Memory
-
-Missing memory type and memory wrappers:
-
-- `wasmtime_memorytype_new`
-- `wasmtime_memorytype_minimum`
-- `wasmtime_memorytype_maximum`
-- `wasmtime_memorytype_is64`
-- `wasmtime_memorytype_isshared`
-- `wasmtime_memorytype_page_size`
-- `wasmtime_memorytype_page_size_log2`
-- `wasmtime_memory_new`
-- `wasmtime_memory_type`
-- `wasmtime_memory_data`
-- `wasmtime_memory_data_size`
-- `wasmtime_memory_size`
-- `wasmtime_memory_grow`
-- `wasmtime_memory_page_size`
-- `wasmtime_memory_page_size_log2`
-
-Swift should avoid exposing unsafe raw pointers as the primary interface. Prefer
-copying read/write APIs and carefully scoped unsafe buffer closures.
+- Shared-memory externs are tracked separately below.
 
 ### Globals
 

@@ -13,6 +13,7 @@ import Testing
     acceptsSendable(EpochDeadlineAction.continue(ticksBeyondCurrent: 1))
     acceptsSendable(CompilationStrategy.automatic)
     acceptsSendable(CraneliftOptimizationLevel.speed)
+    acceptsSendable(try MemoryType(minimumPages: 0))
     acceptsSendable(ValueKind.i32)
     acceptsSendable(FunctionType(parameters: [.i32], results: [.i64]))
     acceptsSendable(Value.i32(1))
@@ -333,6 +334,139 @@ import Testing
     let add = try instance.exportedFunction(named: "add")
 
     #expect(try add.call([.i32(20), .i32(22)]) == [.i32(42)])
+}
+
+@Test func linearMemoriesCanBeCreatedExportedReadWrittenAndGrown() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+
+    let unboundedType = try MemoryType(minimumPages: 0)
+    #expect(unboundedType.minimumPages == 0)
+    #expect(unboundedType.maximumPages == nil)
+    #expect(!unboundedType.is64)
+    #expect(!unboundedType.isShared)
+    #expect(unboundedType.pageSize == 65_536)
+    #expect(unboundedType.pageSizeLog2 == 16)
+
+    let boundedType = try MemoryType(minimumPages: 1, maximumPages: 2)
+    let memory = try Memory(store: store, type: boundedType)
+    #expect(memory.size == 1)
+    #expect(memory.dataSize == 65_536)
+    #expect(memory.pageSize == 65_536)
+    #expect(memory.pageSizeLog2 == 16)
+
+    let reflectedType = try memory.type()
+    #expect(reflectedType.minimumPages == 1)
+    #expect(reflectedType.maximumPages == 2)
+
+    #expect(try memory.read(offset: 0, length: 0) == [])
+    try memory.write(offset: 0, bytes: [])
+    try memory.write(offset: 4, bytes: Array("host".utf8))
+    #expect(try memory.read(offset: 4, length: 4) == Array("host".utf8))
+
+    try #expect(throws: WasmtimeError.memoryAccessOutOfBounds(offset: -1, length: 1, memorySize: 0)) {
+        _ = try memory.read(offset: -1, length: 1)
+    }
+    try #expect(throws: WasmtimeError.memoryAccessOutOfBounds(offset: -1, length: 1, memorySize: 0)) {
+        try memory.write(offset: -1, bytes: [1])
+    }
+    try #expect(throws: WasmtimeError.memoryAccessOutOfBounds(offset: 65_536, length: 1, memorySize: 65_536)) {
+        _ = try memory.read(offset: 65_536, length: 1)
+    }
+    try #expect(throws: WasmtimeError.memoryAccessOutOfBounds(offset: 65_536, length: 1, memorySize: 65_536)) {
+        try memory.write(offset: 65_536, bytes: [1])
+    }
+
+    #expect(try memory.grow(by: 1) == 1)
+    #expect(memory.size == 2)
+    try expectWasmtimeError {
+        _ = try memory.grow(by: 1)
+    }
+
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (memory (export "memory") 1 2)
+          (data (i32.const 8) "guest")
+          (func (export "run")))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+    let exported = try instance.exportedMemory()
+    #expect(try exported.read(offset: 8, length: 5) == Array("guest".utf8))
+
+    try expectSpecificError(.missingExport("missing")) {
+        _ = try instance.exportedMemory(named: "missing")
+    }
+    do {
+        _ = try instance.exportedMemory(named: "run")
+        Issue.record("expected wrong export kind")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected memory"))
+    }
+}
+
+@Test func linkerDefinesStoreBoundMemories() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let memory = try Memory(store: store, type: MemoryType(minimumPages: 1))
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "mem" (memory 1))
+          (func (export "write")
+            i32.const 0
+            i32.const 65
+            i32.store8))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.define(module: "host", name: "mem", memory: memory)
+    let instance = try linker.instantiate(store: store, module: module)
+
+    #expect(try instance.exportedFunction(named: "write").call() == [])
+    #expect(try memory.read(offset: 0, length: 1) == [65])
+}
+
+@Test func runtimeActorManagesExportedMemory() async throws {
+    let runtime = try WasmtimeRuntime()
+    let instance = try await runtime.instantiate(
+        wat: """
+        (module
+          (memory (export "memory") 1 2)
+          (data (i32.const 16) "runtime")
+          (func (export "not-memory")))
+        """
+    )
+
+    #expect(try await runtime.memorySize(in: instance) == 1)
+    #expect(try await runtime.memoryDataSize(in: instance) == 65_536)
+    #expect(try await runtime.readMemory(in: instance, offset: 16, length: 7) == Array("runtime".utf8))
+    try await runtime.writeMemory(in: instance, offset: 16, bytes: Array("MEMORY!".utf8))
+    #expect(try await runtime.readMemory(in: instance, offset: 16, length: 7) == Array("MEMORY!".utf8))
+    #expect(try await runtime.growMemory(in: instance, by: 1) == 1)
+    #expect(try await runtime.memorySize(in: instance) == 2)
+
+    do {
+        _ = try await runtime.readMemory(in: RuntimeInstanceID(rawValue: 999), offset: 0, length: 1)
+        Issue.record("expected missing runtime instance")
+    } catch let error as WasmtimeError {
+        #expect(error == .missingRuntimeInstance(RuntimeInstanceID(rawValue: 999)))
+    }
+    do {
+        _ = try await runtime.readMemory(named: "missing", in: instance, offset: 0, length: 1)
+        Issue.record("expected missing memory export")
+    } catch let error as WasmtimeError {
+        #expect(error == .missingExport("missing"))
+    }
+    do {
+        _ = try await runtime.readMemory(named: "not-memory", in: instance, offset: 0, length: 1)
+        Issue.record("expected wrong export kind")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected memory"))
+    }
 }
 
 @Test func runtimeActorCompilesInstantiatesAndCallsFunctions() async throws {

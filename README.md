@@ -43,12 +43,15 @@ source target.
   calls for `i32`, `i64`, `f32`, and `f64`, trap/error conversion, and WASI
   configuration including arguments, environment, stdio files, stdin bytes,
   stdout/stderr callbacks, and preopened directories.
+- Linear memory support through `MemoryType`, `Memory`, exported memory lookup,
+  safe copy-based memory reads/writes, memory growth, and actor-isolated
+  `WasmtimeRuntime` memory helpers.
 - Linker support for WASI registration, import shadowing, host functions,
   store-bound functions, defining unknown imports as traps or default values,
-  defining an instantiated module namespace, registering a module by name, and
-  instantiating modules through that linker. The remaining low-level extern
-  definition surface for globals, tables, memories, and tags is not exposed
-  yet.
+  store-bound memories, defining an instantiated module namespace, registering a
+  module by name, and instantiating modules through that linker. The remaining
+  low-level extern definition surface for globals, tables, and tags is not
+  exposed yet.
 - Vendored Wasmtime version: `v44.0.1`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
 

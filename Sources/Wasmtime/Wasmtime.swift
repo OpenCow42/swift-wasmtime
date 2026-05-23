@@ -384,6 +384,173 @@ public struct ResourceLimits: Sendable, Equatable {
     }
 }
 
+/// Immutable WebAssembly linear-memory type.
+///
+/// `MemoryType` is not store-bound and may be shared across Swift concurrency
+/// domains. It describes the page limits and memory64/shared/custom-page-size
+/// settings used when creating a host memory.
+public final class MemoryType: @unchecked Sendable {
+    let raw: OpaquePointer
+
+    public init(
+        minimumPages: UInt64,
+        maximumPages: UInt64? = nil,
+        is64: Bool = false,
+        isShared: Bool = false,
+        pageSizeLog2: UInt8 = 16
+    ) throws {
+        var raw: OpaquePointer?
+        try WasmtimeError.throwIfNeeded(
+            wasmtime_memorytype_new(
+                minimumPages,
+                maximumPages != nil,
+                maximumPages ?? 0,
+                is64,
+                isShared,
+                pageSizeLog2,
+                &raw
+            )
+        )
+        guard let raw else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_memorytype_new returned nil without an error") // coverage:ignore defensive C invariant
+        }
+        self.raw = raw
+    }
+
+    init(raw: OpaquePointer) {
+        self.raw = raw
+    }
+
+    public var minimumPages: UInt64 {
+        wasmtime_memorytype_minimum(raw)
+    }
+
+    public var maximumPages: UInt64? {
+        var maximum: UInt64 = 0
+        guard wasmtime_memorytype_maximum(raw, &maximum) else {
+            return nil
+        }
+        return maximum
+    }
+
+    public var is64: Bool {
+        wasmtime_memorytype_is64(raw)
+    }
+
+    public var isShared: Bool {
+        wasmtime_memorytype_isshared(raw)
+    }
+
+    public var pageSize: UInt64 {
+        wasmtime_memorytype_page_size(raw)
+    }
+
+    public var pageSizeLog2: UInt8 {
+        wasmtime_memorytype_page_size_log2(raw)
+    }
+
+    deinit {
+        wasm_memorytype_delete(raw)
+    }
+}
+
+/// Store-bound WebAssembly linear memory.
+///
+/// `Memory` is not `Sendable`. Use it only on the serialized execution path
+/// that owns its `Store`, or access memory through `WasmtimeRuntime`.
+public final class Memory {
+    fileprivate let store: Store
+    let raw: wasmtime_memory_t
+
+    public init(store: Store, type: MemoryType) throws {
+        var memory = wasmtime_memory_t()
+        try WasmtimeError.throwIfNeeded(wasmtime_memory_new(store.context, type.raw, &memory))
+        self.store = store
+        self.raw = memory
+    }
+
+    init(store: Store, raw: wasmtime_memory_t) {
+        self.store = store
+        self.raw = raw
+    }
+
+    public func type() throws -> MemoryType {
+        var memory = raw
+        guard let rawType = wasmtime_memory_type(store.context, &memory) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_memory_type returned nil") // coverage:ignore defensive C invariant
+        }
+        return MemoryType(raw: rawType)
+    }
+
+    public var size: UInt64 {
+        var memory = raw
+        return wasmtime_memory_size(store.context, &memory)
+    }
+
+    public var dataSize: Int {
+        var memory = raw
+        return wasmtime_memory_data_size(store.context, &memory)
+    }
+
+    public var pageSize: UInt64 {
+        var memory = raw
+        return wasmtime_memory_page_size(store.context, &memory)
+    }
+
+    public var pageSizeLog2: UInt8 {
+        var memory = raw
+        return wasmtime_memory_page_size_log2(store.context, &memory)
+    }
+
+    public func read(offset: Int, length: Int) throws -> [UInt8] {
+        guard offset >= 0, length >= 0 else {
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: length, memorySize: 0)
+        }
+        let memorySize = dataSize
+        guard offset <= memorySize, length <= memorySize - offset else {
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: length, memorySize: memorySize)
+        }
+        guard length > 0 else {
+            return []
+        }
+        var memory = raw
+        guard let data = wasmtime_memory_data(store.context, &memory) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: length, memorySize: memorySize)
+        }
+        return Array(UnsafeBufferPointer(start: data.advanced(by: offset), count: length))
+    }
+
+    public func write(offset: Int, bytes: [UInt8]) throws {
+        guard offset >= 0 else {
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: bytes.count, memorySize: 0)
+        }
+        let memorySize = dataSize
+        guard offset <= memorySize, bytes.count <= memorySize - offset else {
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: bytes.count, memorySize: memorySize)
+        }
+        guard !bytes.isEmpty else {
+            return
+        }
+        var memory = raw
+        guard let data = wasmtime_memory_data(store.context, &memory) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: bytes.count, memorySize: memorySize)
+        }
+        bytes.withUnsafeBufferPointer { buffer in
+            if let baseAddress = buffer.baseAddress {
+                data.advanced(by: offset).update(from: baseAddress, count: buffer.count)
+            }
+        }
+    }
+
+    @discardableResult
+    public func grow(by deltaPages: UInt64) throws -> UInt64 {
+        var previousSize: UInt64 = 0
+        var memory = raw
+        try WasmtimeError.throwIfNeeded(wasmtime_memory_grow(store.context, &memory, deltaPages, &previousSize))
+        return previousSize
+    }
+}
+
 /// Action to take after an epoch deadline callback fires.
 public enum EpochDeadlineAction: Sendable, Equatable {
     /// Continue execution and set the next relative deadline.
@@ -600,6 +767,24 @@ public final class Instance {
 
         return Func(store: store, raw: item.of.func)
     }
+
+    public func exportedMemory(named name: String = "memory") throws -> Memory {
+        var item = wasmtime_extern_t()
+        var instance = raw
+        let found = name.withCString { cName in
+            wasmtime_instance_export_get(store.context, &instance, cName, strlen(cName), &item)
+        }
+        guard found else {
+            throw WasmtimeError.missingExport(name)
+        }
+        defer { wasmtime_extern_delete(&item) }
+
+        guard item.kind == WASMTIME_EXTERN_MEMORY else {
+            throw WasmtimeError.wrongExportKind(name: name, expected: "memory", actual: ExternKind(rawValue: item.kind).description)
+        }
+
+        return Memory(store: store, raw: item.of.memory)
+    }
 }
 
 /// Temporary host-callback caller context.
@@ -798,6 +983,23 @@ public final class Linker {
             try name.withCString { cName in
                 try WasmtimeError.throwIfNeeded(
                     wasmtime_linker_define(raw, function.store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
+                )
+            }
+        }
+    }
+
+    /// Defines an already-created store-bound memory in this linker.
+    ///
+    /// The memory remains bound to the store that created it. The linker uses
+    /// that store automatically when registering the extern.
+    public func define(module: String, name: String, memory: Memory) throws {
+        var item = wasmtime_extern_t()
+        item.kind = wasmtime_extern_kind_t(WASMTIME_EXTERN_MEMORY)
+        item.of.memory = memory.raw
+        try module.withCString { cModule in
+            try name.withCString { cName in
+                try WasmtimeError.throwIfNeeded(
+                    wasmtime_linker_define(raw, memory.store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
                 )
             }
         }
@@ -1215,6 +1417,55 @@ public actor WasmtimeRuntime {
             throw WasmtimeError.missingRuntimeInstance(instanceID)
         }
         return try instance.exportedFunction(named: functionName).call(arguments)
+    }
+
+    public func readMemory(
+        named memoryName: String = "memory",
+        in instanceID: RuntimeInstanceID,
+        offset: Int,
+        length: Int
+    ) throws -> [UInt8] {
+        guard let instance = instances[instanceID] else {
+            throw WasmtimeError.missingRuntimeInstance(instanceID)
+        }
+        return try instance.exportedMemory(named: memoryName).read(offset: offset, length: length)
+    }
+
+    public func writeMemory(
+        named memoryName: String = "memory",
+        in instanceID: RuntimeInstanceID,
+        offset: Int,
+        bytes: [UInt8]
+    ) throws {
+        guard let instance = instances[instanceID] else {
+            throw WasmtimeError.missingRuntimeInstance(instanceID)
+        }
+        try instance.exportedMemory(named: memoryName).write(offset: offset, bytes: bytes)
+    }
+
+    public func growMemory(
+        named memoryName: String = "memory",
+        in instanceID: RuntimeInstanceID,
+        by deltaPages: UInt64
+    ) throws -> UInt64 {
+        guard let instance = instances[instanceID] else {
+            throw WasmtimeError.missingRuntimeInstance(instanceID)
+        }
+        return try instance.exportedMemory(named: memoryName).grow(by: deltaPages)
+    }
+
+    public func memorySize(named memoryName: String = "memory", in instanceID: RuntimeInstanceID) throws -> UInt64 {
+        guard let instance = instances[instanceID] else {
+            throw WasmtimeError.missingRuntimeInstance(instanceID)
+        }
+        return try instance.exportedMemory(named: memoryName).size
+    }
+
+    public func memoryDataSize(named memoryName: String = "memory", in instanceID: RuntimeInstanceID) throws -> Int {
+        guard let instance = instances[instanceID] else {
+            throw WasmtimeError.missingRuntimeInstance(instanceID)
+        }
+        return try instance.exportedMemory(named: memoryName).dataSize
     }
 
     public func call(_ functionName: String, in componentInstanceID: RuntimeComponentInstanceID) throws {
