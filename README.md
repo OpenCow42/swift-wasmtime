@@ -12,7 +12,8 @@ small Swift 6 API, and keeps the C ownership rules explicit.
   `wat2wasm` C API.
 - Direct instantiation, linker instantiation, exported function lookup, scalar
   calls for `i32`, `i64`, `f32`, and `f64`, trap/error conversion, and basic
-  WASI configuration.
+  WASI configuration including arguments, environment, stdio, and preopened
+  directories.
 - Vendored Wasmtime version: `v44.0.1`.
 
 ## Version Tags

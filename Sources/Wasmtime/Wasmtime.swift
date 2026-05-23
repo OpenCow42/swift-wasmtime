@@ -276,6 +276,29 @@ public final class WasiConfig {
         }
     }
 
+    public func preopenDirectory(
+        hostPath: String,
+        guestPath: String,
+        directoryPermissions: WasiDirectoryPermissions = [.read],
+        filePermissions: WasiFilePermissions = [.read]
+    ) throws {
+        try hostPath.withCString { cHostPath in
+            try guestPath.withCString { cGuestPath in
+                guard wasi_config_preopen_dir(
+                    requiredRaw,
+                    cHostPath,
+                    cGuestPath,
+                    directoryPermissions.rawValue,
+                    filePermissions.rawValue
+                ) else {
+                    throw WasmtimeError.wasiConfigurationFailed(
+                        "could not preopen WASI directory: \(hostPath) as \(guestPath)"
+                    )
+                }
+            }
+        }
+    }
+
     func release() -> OpaquePointer {
         let current = requiredRaw
         raw = nil
@@ -294,6 +317,28 @@ public final class WasiConfig {
             wasi_config_delete(raw)
         }
     }
+}
+
+public struct WasiDirectoryPermissions: OptionSet, Sendable, Hashable {
+    public let rawValue: Int
+
+    public init(rawValue: Int) {
+        self.rawValue = rawValue
+    }
+
+    public static let read = Self(rawValue: Int(WASMTIME_WASI_DIR_PERMS_READ.rawValue))
+    public static let write = Self(rawValue: Int(WASMTIME_WASI_DIR_PERMS_WRITE.rawValue))
+}
+
+public struct WasiFilePermissions: OptionSet, Sendable, Hashable {
+    public let rawValue: Int
+
+    public init(rawValue: Int) {
+        self.rawValue = rawValue
+    }
+
+    public static let read = Self(rawValue: Int(WASMTIME_WASI_FILE_PERMS_READ.rawValue))
+    public static let write = Self(rawValue: Int(WASMTIME_WASI_FILE_PERMS_WRITE.rawValue))
 }
 
 public enum Value: Sendable, Equatable, CustomStringConvertible {
