@@ -58,22 +58,23 @@ actor-isolated `WasmtimeRuntime` methods.
 
 ### General Extern Wrappers
 
-The package exposes generic extern lookup, but globals, tables, tags, and shared
-memories do not have first-class safe wrappers yet.
+The package exposes generic extern lookup, but tables, tags, and shared memories
+do not have first-class safe wrappers yet.
 
-- Public `Linker.define` overloads for globals, tables, and tags.
+- Public `Linker.define` overloads for tables and tags.
 - Public export-by-index support via `wasmtime_instance_export_nth`.
 - Shared-memory externs are tracked separately below.
 
 ### Globals
 
-Missing global type and global wrappers:
+Numeric scalar globals are covered by `GlobalType`, `Global`,
+`Instance.exportedGlobal(named:)`, `Extern.global`, and
+`Linker.define(module:name:global:)`.
 
-- `wasmtime_global_new`
-- `wasmtime_global_type`
-- `wasmtime_global_get`
-- `wasmtime_global_set`
-- Standard C API global type helpers from `wasm.h`.
+Remaining global-related gaps:
+
+- Reference-typed global values, pending broader reference value modeling.
+- Actor-isolated global get/set helpers on `WasmtimeRuntime`.
 
 ### Tables
 

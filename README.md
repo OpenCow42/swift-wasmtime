@@ -22,8 +22,8 @@ source target.
 ## Current Scope
 
 - Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`, `Instance`,
-  `Linker`, `Extern`, `Func`, `MemoryType`, `Memory`, `Value`, `Trap`,
-  `WasmtimeError`, and `WasiConfig`.
+  `Linker`, `Extern`, `Func`, `GlobalType`, `Global`, `MemoryType`, `Memory`,
+  `Value`, `Trap`, `WasmtimeError`, and `WasiConfig`.
 - Swift 6 thread-safe surface: `EngineOptions` for sendable engine
   configuration, `WasiOptions` for sendable WASI configuration, and
   `WasmtimeRuntime` for actor-serialized store execution.
@@ -47,15 +47,17 @@ source target.
 - Linear memory support through `MemoryType`, `Memory`, exported memory lookup,
   safe copy-based memory reads/writes, memory growth, and actor-isolated
   `WasmtimeRuntime` memory helpers.
+- Numeric scalar global support through `GlobalType`, `Global`, exported global
+  lookup, immutable and mutable global reads/writes, and linker-defined globals.
 - General extern lookup through `Instance.export(named:)`, `Extern`, and
-  `Linker.get(store:module:name:)`. Functions and memories have first-class
-  wrappers today; globals, tables, tags, and shared memories are reported by
+  `Linker.get(store:module:name:)`. Functions, globals, and memories have
+  first-class wrappers today; tables, tags, and shared memories are reported by
   kind until their dedicated wrappers land.
 - Linker support for WASI registration, import shadowing, host functions,
   store-bound functions, defining unknown imports as traps or default values,
-  store-bound memories, defining an instantiated module namespace, registering a
-  module by name, and instantiating modules through that linker. The remaining
-  low-level extern definition surface for globals, tables, and tags is not
+  store-bound globals and memories, defining an instantiated module namespace,
+  registering a module by name, and instantiating modules through that linker.
+  The remaining low-level extern definition surface for tables and tags is not
   exposed yet.
 - Vendored Wasmtime version: `v44.0.1`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.

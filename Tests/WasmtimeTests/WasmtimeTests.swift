@@ -14,6 +14,7 @@ import Testing
     acceptsSendable(CompilationStrategy.automatic)
     acceptsSendable(CraneliftOptimizationLevel.speed)
     acceptsSendable(try MemoryType(minimumPages: 0))
+    acceptsSendable(try GlobalType(content: .i32))
     acceptsSendable(ValueKind.i32)
     acceptsSendable(FunctionType(parameters: [.i32], results: [.i64]))
     acceptsSendable(Value.i32(1))
@@ -407,7 +408,140 @@ import Testing
     }
 }
 
-@Test func instancesExposeGenericExternsForFunctionsMemoriesAndUnsupportedKinds() throws {
+@Test func globalsReadImmutableExportsAndReflectNumericTypes() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (global (export "answer") i32 (i32.const 42))
+          (global (export "wide") i64 (i64.const 84))
+          (global (export "float") f32 (f32.const 1.5))
+          (global (export "double") f64 (f64.const 2.5)))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+
+    let answer = try instance.exportedGlobal(named: "answer")
+    #expect(try answer.get() == .i32(42))
+    let answerType = try answer.type()
+    #expect(answerType.content == .i32)
+    #expect(!answerType.isMutable)
+
+    let wideType = try instance.exportedGlobal(named: "wide").type()
+    #expect(wideType.content == .i64)
+    #expect(!wideType.isMutable)
+    #expect(try instance.exportedGlobal(named: "wide").get() == .i64(84))
+
+    let floatType = try instance.exportedGlobal(named: "float").type()
+    #expect(floatType.content == .f32)
+    #expect(!floatType.isMutable)
+    #expect(try instance.exportedGlobal(named: "float").get() == .f32(1.5))
+
+    let doubleType = try instance.exportedGlobal(named: "double").type()
+    #expect(doubleType.content == .f64)
+    #expect(!doubleType.isMutable)
+    #expect(try instance.exportedGlobal(named: "double").get() == .f64(2.5))
+
+    try expectWasmtimeError {
+        try answer.set(.i32(7))
+    }
+}
+
+@Test func mutableGlobalsCanBeSetFromSwift() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (global (export "counter") (mut i32) (i32.const 1))
+          (func (export "read") (result i32)
+            global.get 0))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+    let counter = try instance.exportedGlobal(named: "counter")
+
+    let counterType = try counter.type()
+    #expect(counterType.content == .i32)
+    #expect(counterType.isMutable)
+    #expect(try counter.get() == .i32(1))
+
+    try counter.set(.i32(9))
+    #expect(try counter.get() == .i32(9))
+    #expect(try instance.exportedFunction(named: "read").call() == [.i32(9)])
+
+    try expectWasmtimeError {
+        try counter.set(.i64(9))
+    }
+}
+
+@Test func globalsReportMissingAndWrongKindExports() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (func (export "run"))
+          (memory (export "memory") 1))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+
+    try expectSpecificError(.missingExport("missing")) {
+        _ = try instance.exportedGlobal(named: "missing")
+    }
+    do {
+        _ = try instance.exportedGlobal(named: "run")
+        Issue.record("expected wrong export kind")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected global"))
+    }
+    do {
+        _ = try instance.exportedFunction(named: "memory")
+        Issue.record("expected wrong export kind")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected func"))
+    }
+}
+
+@Test func linkerDefinesAndGetsStoreBoundGlobals() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let global = try Global(store: store, type: GlobalType(content: .i32, isMutable: true), value: .i32(11))
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "global" (global $global (mut i32)))
+          (func (export "read") (result i32)
+            global.get $global)
+          (func (export "write") (param i32)
+            local.get 0
+            global.set $global))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.define(module: "host", name: "global", global: global)
+
+    switch try #require(linker.get(store: store, module: "host", name: "global")) {
+    case .global(let linkedGlobal):
+        #expect(try linkedGlobal.get() == .i32(11))
+        try linkedGlobal.set(.i32(12))
+    default:
+        Issue.record("expected global extern")
+    }
+
+    let instance = try linker.instantiate(store: store, module: module)
+    #expect(try instance.exportedFunction(named: "read").call() == [.i32(12)])
+    #expect(try instance.exportedFunction(named: "write").call([.i32(13)]) == [])
+    #expect(try global.get() == .i32(13))
+}
+
+@Test func instancesExposeGenericExternsForFunctionsGlobalsMemoriesAndUnsupportedKinds() throws {
     let engine = try Engine()
     let store = try Store(engine: engine)
     let module = try Module(
@@ -416,7 +550,8 @@ import Testing
         (module
           (func (export "answer") (result i32) i32.const 42)
           (memory (export "memory") 1)
-          (global (export "global") i32 (i32.const 7)))
+          (global (export "global") i32 (i32.const 7))
+          (table (export "table") 1 funcref))
         """
     )
     let instance = try Instance(store: store, module: module)
@@ -435,14 +570,24 @@ import Testing
         Issue.record("expected memory extern")
     }
 
-    let unsupported = try instance.export(named: "global")
-    #expect(unsupported.kind == .global)
+    switch try instance.export(named: "global") {
+    case .global(let global):
+        #expect(try global.get() == .i32(7))
+    default:
+        Issue.record("expected global extern")
+    }
+
+    let unsupported = try instance.export(named: "table")
+    #expect(unsupported.kind == .table)
     switch unsupported {
-    case .unsupported(.global):
+    case .unsupported(.table):
         break
     default:
-        Issue.record("expected unsupported global extern")
+        Issue.record("expected unsupported table extern")
     }
+
+    let global = try instance.exportedGlobal(named: "global")
+    #expect(try global.get() == .i32(7))
 
     try expectSpecificError(.missingExport("missing")) {
         _ = try instance.export(named: "missing")

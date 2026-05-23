@@ -551,18 +551,110 @@ public final class Memory {
     }
 }
 
+/// Immutable WebAssembly global type.
+///
+/// `GlobalType` is not store-bound and may be shared across Swift concurrency
+/// domains. This wrapper currently supports numeric scalar value kinds only.
+public final class GlobalType: @unchecked Sendable {
+    let raw: OpaquePointer
+
+    public let content: ValueKind
+    public let isMutable: Bool
+
+    public init(content: ValueKind, isMutable: Bool = false) throws {
+        guard let valueType = wasm_valtype_new(content.wasmRawValue) else { // coverage:ignore defensive C allocation failure
+            throw WasmtimeError.allocationFailed("wasm_valtype_new returned nil")
+        }
+        let mutability = wasm_mutability_t(isMutable ? WASM_VAR.rawValue : WASM_CONST.rawValue)
+        guard let raw = wasm_globaltype_new(valueType, mutability) else { // coverage:ignore defensive C allocation failure
+            wasm_valtype_delete(valueType) // coverage:ignore defensive C allocation failure
+            throw WasmtimeError.allocationFailed("wasm_globaltype_new returned nil") // coverage:ignore defensive C allocation failure
+        }
+        self.raw = raw
+        self.content = content
+        self.isMutable = isMutable
+    }
+
+    init(raw: OpaquePointer) throws {
+        guard let valueType = wasm_globaltype_content(raw) else { // coverage:ignore defensive C invariant
+            wasm_globaltype_delete(raw) // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasm_globaltype_content returned nil") // coverage:ignore defensive C invariant
+        }
+        do {
+            self.content = try ValueKind(rawValue: wasm_valtype_kind(valueType))
+        } catch {
+            wasm_globaltype_delete(raw)
+            throw error
+        }
+        self.isMutable = wasm_globaltype_mutability(raw) == wasm_mutability_t(WASM_VAR.rawValue)
+        self.raw = raw
+    }
+
+    deinit {
+        wasm_globaltype_delete(raw)
+    }
+}
+
+/// Store-bound WebAssembly global.
+///
+/// `Global` is not `Sendable`. Use it only on the serialized execution path
+/// that owns its `Store`. This wrapper currently supports numeric scalar values
+/// through `Value`.
+public final class Global {
+    fileprivate let store: Store
+    let raw: wasmtime_global_t
+
+    public init(store: Store, type: GlobalType, value: Value) throws {
+        var global = wasmtime_global_t()
+        var rawValue = value.rawValue
+        try WasmtimeError.throwIfNeeded(wasmtime_global_new(store.context, type.raw, &rawValue, &global))
+        self.store = store
+        self.raw = global
+    }
+
+    init(store: Store, raw: wasmtime_global_t) {
+        self.store = store
+        self.raw = raw
+    }
+
+    public func type() throws -> GlobalType {
+        var global = raw
+        guard let rawType = wasmtime_global_type(store.context, &global) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_global_type returned nil") // coverage:ignore defensive C invariant
+        }
+        return try GlobalType(raw: rawType)
+    }
+
+    public func get() throws -> Value {
+        var global = raw
+        var rawValue = wasmtime_val_t()
+        wasmtime_global_get(store.context, &global, &rawValue)
+        defer { wasmtime_val_unroot(&rawValue) }
+        return try Value(rawValue: rawValue)
+    }
+
+    public func set(_ value: Value) throws {
+        var global = raw
+        var rawValue = value.rawValue
+        try WasmtimeError.throwIfNeeded(wasmtime_global_set(store.context, &global, &rawValue))
+    }
+}
+
 /// Store-bound extern item exported by an instance or found in a linker.
 ///
-/// Only functions and memories have first-class wrappers today. Other extern
-/// kinds are surfaced as `unsupported` until their safe Swift wrappers land.
+/// Functions, globals, and memories have first-class wrappers today. Other
+/// extern kinds are surfaced as `unsupported` until their safe Swift wrappers
+/// land.
 public enum Extern {
     case function(Func)
+    case global(Global)
     case memory(Memory)
     case unsupported(ExternKind)
 
     public var kind: ExternKind {
         switch self {
         case .function: .function
+        case .global: .global
         case .memory: .memory
         case .unsupported(let kind): kind
         }
@@ -572,6 +664,8 @@ public enum Extern {
         switch item.kind {
         case wasmtime_extern_kind_t(WASMTIME_EXTERN_FUNC):
             self = .function(Func(store: store, raw: item.of.func))
+        case wasmtime_extern_kind_t(WASMTIME_EXTERN_GLOBAL):
+            self = .global(Global(store: store, raw: item.of.global))
         case wasmtime_extern_kind_t(WASMTIME_EXTERN_MEMORY):
             self = .memory(Memory(store: store, raw: item.of.memory))
         default:
@@ -800,6 +894,15 @@ public final class Instance {
         }
 
         return function
+    }
+
+    public func exportedGlobal(named name: String) throws -> Global {
+        let item = try export(named: name)
+        guard case .global(let global) = item else {
+            throw WasmtimeError.wrongExportKind(name: name, expected: "global", actual: item.kind.description)
+        }
+
+        return global
     }
 
     public func exportedMemory(named name: String = "memory") throws -> Memory {
@@ -1039,6 +1142,23 @@ public final class Linker {
             try name.withCString { cName in
                 try WasmtimeError.throwIfNeeded(
                     wasmtime_linker_define(raw, memory.store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
+                )
+            }
+        }
+    }
+
+    /// Defines an already-created store-bound global in this linker.
+    ///
+    /// The global remains bound to the store that created it. The linker uses
+    /// that store automatically when registering the extern.
+    public func define(module: String, name: String, global: Global) throws {
+        var item = wasmtime_extern_t()
+        item.kind = wasmtime_extern_kind_t(WASMTIME_EXTERN_GLOBAL)
+        item.of.global = global.raw
+        try module.withCString { cModule in
+            try name.withCString { cName in
+                try WasmtimeError.throwIfNeeded(
+                    wasmtime_linker_define(raw, global.store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
                 )
             }
         }
@@ -1833,6 +1953,21 @@ public enum ValueKind: Sendable, Equatable, CustomStringConvertible {
         case .i64: wasm_valkind_t(WASM_I64.rawValue)
         case .f32: wasm_valkind_t(WASM_F32.rawValue)
         case .f64: wasm_valkind_t(WASM_F64.rawValue)
+        }
+    }
+
+    init(rawValue: wasm_valkind_t) throws {
+        switch rawValue {
+        case wasm_valkind_t(WASM_I32.rawValue):
+            self = .i32
+        case wasm_valkind_t(WASM_I64.rawValue):
+            self = .i64
+        case wasm_valkind_t(WASM_F32.rawValue):
+            self = .f32
+        case wasm_valkind_t(WASM_F64.rawValue):
+            self = .f64
+        default:
+            throw WasmtimeError.unsupportedValueKind(Int(rawValue))
         }
     }
 
