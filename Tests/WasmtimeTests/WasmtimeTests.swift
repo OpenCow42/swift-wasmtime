@@ -541,6 +541,10 @@ private let nativeTargetTriple = {
     "aarch64-unknown-linux-gnu"
     #elseif os(Linux) && arch(x86_64)
     "x86_64-unknown-linux-gnu"
+    #elseif os(Windows) && arch(arm64)
+    "aarch64-pc-windows-msvc"
+    #elseif os(Windows) && arch(x86_64)
+    "x86_64-pc-windows-msvc"
     #else
     "unknown"
     #endif
