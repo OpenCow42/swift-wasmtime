@@ -63,8 +63,9 @@ source target.
 - Linker support for WASI registration, import shadowing, host functions,
   store-bound functions, defining unknown imports as traps or default values,
   store-bound globals and memories, defining an instantiated module namespace,
-  registering a module by name, and instantiating modules through that linker.
-  The remaining low-level extern definition surface for tags is not exposed yet.
+  registering a module by name, cloning linker definitions, resolving a named
+  module's default function, and instantiating modules through that linker. The
+  remaining low-level extern definition surface for tags is not exposed yet.
 - Vendored Wasmtime version: `v44.0.1`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
 

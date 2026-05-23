@@ -1362,10 +1362,24 @@ public final class Linker {
         self.raw = raw
     }
 
+    private init(engine: Engine, raw: OpaquePointer, allowsShadowing: Bool) {
+        self.engine = engine
+        self.raw = raw
+        self.allowsShadowing = allowsShadowing
+    }
+
     public var allowsShadowing: Bool = false {
         didSet {
             wasmtime_linker_allow_shadowing(raw, allowsShadowing)
         }
+    }
+
+    public func clone() throws -> Linker {
+        guard let cloned = wasmtime_linker_clone(raw) else { // coverage:ignore defensive C allocation failure
+            throw WasmtimeError.allocationFailed("wasmtime_linker_clone returned nil")
+        }
+
+        return Linker(engine: engine, raw: cloned, allowsShadowing: allowsShadowing)
     }
 
     public func defineWasi() throws {
@@ -1392,6 +1406,17 @@ public final class Linker {
         }
         defer { wasmtime_extern_delete(&item) }
         return Extern(store: store, raw: item)
+    }
+
+    public func defaultFunction(store: Store, moduleName: String) throws -> Func {
+        var function = wasmtime_func_t()
+        try moduleName.withCString { cName in
+            try WasmtimeError.throwIfNeeded(
+                wasmtime_linker_get_default(raw, store.context, cName, strlen(cName), &function)
+            )
+        }
+
+        return Func(store: store, raw: function)
     }
 
     public func defineInstance(store: Store, name: String, instance: Instance) throws {

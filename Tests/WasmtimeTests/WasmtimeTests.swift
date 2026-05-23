@@ -924,6 +924,63 @@ import Testing
     #expect(linker.get(store: store, module: "provider", name: "memory")?.kind == .memory)
 }
 
+@Test func linkerCloneCopiesDefinitionsAndKeepsLaterDefinitionsIndependent() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let linker = try Linker(engine: engine)
+    linker.allowsShadowing = true
+    try linker.defineFunction(module: "host", name: "answer", results: [.i32]) { _, _ in
+        [.i32(42)]
+    }
+
+    let clone = try linker.clone()
+    switch try #require(clone.get(store: store, module: "host", name: "answer")) {
+    case .function(let function):
+        #expect(try function.call() == [.i32(42)])
+    default:
+        Issue.record("expected cloned function extern")
+    }
+
+    try clone.defineFunction(module: "host", name: "answer", results: [.i32]) { _, _ in
+        [.i32(7)]
+    }
+    try clone.defineFunction(module: "host", name: "clone_only", results: [.i32]) { _, _ in
+        [.i32(99)]
+    }
+
+    switch try #require(clone.get(store: store, module: "host", name: "answer")) {
+    case .function(let function):
+        #expect(try function.call() == [.i32(7)])
+    default:
+        Issue.record("expected shadowed cloned function extern")
+    }
+    switch try #require(linker.get(store: store, module: "host", name: "answer")) {
+    case .function(let function):
+        #expect(try function.call() == [.i32(42)])
+    default:
+        Issue.record("expected original function extern")
+    }
+    #expect(linker.get(store: store, module: "host", name: "clone_only") == nil)
+}
+
+@Test func linkerResolvesDefaultFunctionForNamedModule() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (func (export "_start")))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.defineModule(store: store, name: "command", module: module)
+
+    let start = try linker.defaultFunction(store: store, moduleName: "command")
+    #expect(try start.type() == FunctionType())
+    #expect(try start.call() == [])
+}
+
 @Test func runtimeActorManagesExportedMemory() async throws {
     let runtime = try WasmtimeRuntime()
     let instance = try await runtime.instantiate(

@@ -22,7 +22,8 @@ visible before public release.
 - Swift concurrency surface through `EngineOptions`, `WasiOptions`, and the
   `WasmtimeRuntime` actor.
 - Core module compilation from WAT, bytes, and `Data`.
-- Direct and linker-based instantiation.
+- Direct and linker-based instantiation, linker cloning, and default function
+  lookup for named modules.
 - Exported core function lookup and checked scalar calls for `i32`, `i64`,
   `f32`, and `f64`.
 - Function signature introspection through `Func.type()` and `FunctionType`.
@@ -158,8 +159,6 @@ These should remain unimplemented until a strong Swift safety story exists.
 
 Missing linker surface:
 
-- `wasmtime_linker_clone`
-- `wasmtime_linker_get_default`
 - `wasmtime_linker_instantiate_pre`
 - `wasmtime_instance_pre_instantiate`
 - `wasmtime_instance_pre_module`
@@ -167,8 +166,6 @@ Missing linker surface:
 
 Likely Swift shape:
 
-- `Linker.clone()`
-- `Linker.defaultFunction(...) -> Func`
 - `InstancePre` as a non-`Sendable` low-level wrapper.
 - Actor-managed pre-instantiation APIs only if they can preserve store safety.
 
