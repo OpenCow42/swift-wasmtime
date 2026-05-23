@@ -21,6 +21,8 @@ The project values:
 - readable tests over opaque binary fixtures
 - vendored, verified artifacts over build-time network access
 - modern Swift concurrency annotations where they are sound
+- SwiftPM-friendly release tags that mirror vendored Wasmtime semver without a
+  leading `v`
 
 The first milestone is not a complete Wasmtime binding. It is a small, reliable
 core that can compile, instantiate, call, trap, configure WASI, and teach future

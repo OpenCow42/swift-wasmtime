@@ -15,6 +15,14 @@ small Swift 6 API, and keeps the C ownership rules explicit.
   WASI configuration.
 - Vendored Wasmtime version: `v44.0.1`.
 
+## Version Tags
+
+Git release tags use SwiftPM-friendly semantic versions without a leading `v`.
+For example, this package tag is `44.0.1`, matching the vendored Wasmtime
+`v44.0.1` release. Upstream Wasmtime still uses `v`-prefixed tags, so scripts
+and vendored paths keep the upstream spelling where they interact with
+Bytecode Alliance release assets.
+
 ## Build And Test
 
 On this machine the Xcode toolchain is the known-good path:

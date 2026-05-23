@@ -28,6 +28,15 @@ well tested.
   impossible type metadata nils, Swift `String` failing UTF-8 validation, or
   intentional precondition crash branches.
 
+## Release Tags
+
+- Publish package release tags as plain semantic versions for SwiftPM, such as
+  `44.0.1`.
+- Keep upstream Wasmtime references `v`-prefixed when talking to GitHub release
+  assets or vendored directories, such as `v44.0.1`.
+- When updating Wasmtime, the SwiftPM tag should match the vendored Wasmtime
+  version after removing the leading `v`.
+
 ## Vendored Files
 
 `Sources/CWasmtime/include` and `Vendor/Wasmtime` are generated from
