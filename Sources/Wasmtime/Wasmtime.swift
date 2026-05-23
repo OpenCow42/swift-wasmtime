@@ -1230,6 +1230,14 @@ public final class Module: @unchecked Sendable {
     private let engine: Engine
     let raw: OpaquePointer
 
+    public static func validate(engine: Engine, wasm: [UInt8]) throws {
+        try validate(engine: engine, bytes: wasm)
+    }
+
+    public static func validate(engine: Engine, data: Data) throws {
+        try validate(engine: engine, bytes: Array(data))
+    }
+
     public convenience init(engine: Engine, wasm: [UInt8]) throws {
         try self.init(engine: engine, bytes: wasm)
     }
@@ -1258,6 +1266,13 @@ public final class Module: @unchecked Sendable {
     init(engine: Engine, raw: OpaquePointer) {
         self.engine = engine
         self.raw = raw
+    }
+
+    public func clone() throws -> Module {
+        guard let clone = wasmtime_module_clone(raw) else { // coverage:ignore defensive C allocation failure
+            throw WasmtimeError.allocationFailed("wasmtime_module_clone returned nil")
+        }
+        return Module(engine: engine, raw: clone)
     }
 
     public func imports() throws -> [ModuleImport] {
@@ -1300,6 +1315,13 @@ public final class Module: @unchecked Sendable {
 
     deinit {
         wasmtime_module_delete(raw)
+    }
+
+    private static func validate(engine: Engine, bytes: [UInt8]) throws {
+        let error = bytes.withUnsafeBufferPointer { buffer in
+            wasmtime_module_validate(engine.raw, buffer.baseAddress, buffer.count)
+        }
+        try WasmtimeError.throwIfNeeded(error)
     }
 }
 

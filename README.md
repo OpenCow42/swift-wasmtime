@@ -41,7 +41,8 @@ source target.
   registering WASIp2/WASI HTTP host interfaces, instantiating components, and
   calling zero-parameter, zero-result component functions.
 - Module compilation from Wasm bytes, `Data`, or WAT text via Wasmtime's
-  `wat2wasm` C API, plus import/export type metadata inspection for functions,
+  `wat2wasm` C API, validation of Wasm bytes before compilation, shallow
+  module cloning, plus import/export type metadata inspection for functions,
   globals, tables, and memories.
 - Direct instantiation, linker instantiation, exported function lookup, scalar
   calls for `i32`, `i64`, `f32`, and `f64`, function signature introspection,

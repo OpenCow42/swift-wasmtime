@@ -21,7 +21,8 @@ visible before public release.
 - Engine/config/store/module/instance/function/linker basics.
 - Swift concurrency surface through `EngineOptions`, `WasiOptions`, and the
   `WasmtimeRuntime` actor.
-- Core module compilation from WAT, bytes, and `Data`.
+- Core module compilation from WAT, bytes, and `Data`, validation of Wasm bytes
+  and `Data`, and shallow module cloning.
 - Core module import/export type metadata through `Module.imports()` and
   `Module.exports()`.
 - Direct and linker-based instantiation, linker cloning, and default function
@@ -254,12 +255,10 @@ Related C API families:
 
 Missing module APIs:
 
-- `wasmtime_module_validate`
 - `wasmtime_module_serialize`
 - `wasmtime_module_deserialize`
 - `wasmtime_module_deserialize_file`
 - `wasmtime_module_image_range`
-- `wasmtime_module_clone`
 
 The deserialize APIs must be documented as trusted-input only, matching
 Wasmtime's C API safety notes.

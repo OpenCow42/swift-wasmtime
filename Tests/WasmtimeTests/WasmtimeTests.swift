@@ -46,6 +46,9 @@ import Testing
     let engine = try Engine()
     let wasm = try WasmText.compile("(module)")
 
+    try Module.validate(engine: engine, wasm: wasm)
+    try Module.validate(engine: engine, data: Data(wasm))
+
     let bytesModule = try Module(engine: engine, wasm: wasm)
     acceptsSendable(bytesModule)
 
@@ -55,6 +58,45 @@ import Testing
     let emptyModule = try Module(engine: engine, wat: "(module)")
     #expect(try emptyModule.imports().isEmpty)
     #expect(try emptyModule.exports().isEmpty)
+}
+
+@Test func moduleValidationRejectsInvalidWasm() throws {
+    let engine = try Engine()
+
+    try expectWasmtimeError {
+        try Module.validate(engine: engine, wasm: [0, 1, 2, 3])
+    }
+
+    try expectWasmtimeError {
+        try Module.validate(engine: engine, data: Data([0, 1, 2, 3]))
+    }
+}
+
+@Test func moduleCloneCanBeInstantiatedAndKeepsMetadata() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "value" (global i32))
+          (func (export "answer") (result i32)
+            global.get 0))
+        """
+    )
+
+    let clone = try module.clone()
+    acceptsSendable(clone)
+
+    #expect(try clone.imports() == module.imports())
+    #expect(try clone.exports() == module.exports())
+
+    let global = try Global(store: store, type: GlobalType(content: .i32), value: .i32(42))
+    let linker = try Linker(engine: engine)
+    try linker.define(module: "host", name: "value", global: global)
+
+    let instance = try linker.instantiate(store: store, module: clone)
+    #expect(try instance.exportedFunction(named: "answer").call() == [.i32(42)])
 }
 
 @Test func modulesExposeImportAndExportTypeMetadata() throws {
