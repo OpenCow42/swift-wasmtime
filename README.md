@@ -187,11 +187,13 @@ let hostBacked = try await runtime.instantiateWithLinker(
         },
     ]
 )
+```
 
 Low-level `Linker.defineFunction` callbacks are `@Sendable`. The `Caller`
 value passed to a host callback is only valid for that callback invocation;
 copy any data you need from guest memory before returning.
 
+```swift
 let componentRuntime = try WasmtimeRuntime(
     options: EngineOptions(isComponentModelEnabled: true)
 )
