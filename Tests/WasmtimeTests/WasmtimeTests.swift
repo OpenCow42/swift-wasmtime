@@ -24,7 +24,7 @@ import Testing
     acceptsSendable(WasmtimeError.missingExport("missing"))
 
     let emptyCaller = Caller(raw: nil)
-    #expect(emptyCaller.exportKind(named: "memory") == nil)
+    #expect(try emptyCaller.exportKind(named: "memory") == nil)
     #expect(try emptyCaller.readMemory(offset: 0, length: 0) == nil)
     #expect(try emptyCaller.writeMemory(offset: 0, bytes: []) == false)
 }
@@ -646,7 +646,7 @@ import Testing
         """
     )
     let linker = try Linker(engine: engine)
-    try linker.define(store: store, module: "host", name: "add", function: add)
+    try linker.define(module: "host", name: "add", function: add)
     let instance = try linker.instantiate(store: store, module: module)
 
     #expect(try instance.exportedFunction(named: "run").call() == [.i32(15)])
@@ -773,8 +773,8 @@ import Testing
     )
     let linker = try Linker(engine: engine)
     try linker.defineFunction(module: "host", name: "uppercase", parameters: [.i32, .i32], results: [.i32]) { caller, arguments in
-        #expect(caller.exportKind(named: "memory") == .memory)
-        #expect(caller.exportKind(named: "missing") == nil)
+        #expect(try caller.exportKind(named: "memory") == .memory)
+        #expect(try caller.exportKind(named: "missing") == nil)
         #expect(try caller.readMemory(named: "missing", offset: 0, length: 1) == nil)
         #expect(try caller.writeMemory(named: "missing", offset: 0, bytes: [1]) == false)
 
@@ -833,6 +833,42 @@ import Testing
         WasmtimeError.memoryAccessOutOfBounds(offset: 1, length: 2, memorySize: 3).description ==
             "memory access out of bounds: offset 1, length 2, memory size 3"
     )
+}
+
+@Test func hostFunctionCallerExpiresAfterCallbackReturns() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let escapedCaller = LockedCallerBox()
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "capture" (func $capture))
+          (memory (export "memory") 1)
+          (func (export "run")
+            call $capture))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.defineFunction(module: "host", name: "capture", type: FunctionType()) { caller, _ in
+        escapedCaller.set(caller)
+        let kind = try caller.exportKind(named: "memory")
+        #expect(kind == .memory)
+        return []
+    }
+    let instance = try linker.instantiate(store: store, module: module)
+    #expect(try instance.exportedFunction(named: "run").call() == [])
+
+    let caller = try #require(escapedCaller.get())
+    #expect(throws: WasmtimeError.callerExpired) {
+        _ = try caller.exportKind(named: "memory")
+    }
+    #expect(throws: WasmtimeError.callerExpired) {
+        _ = try caller.readMemory(offset: 0, length: 1)
+    }
+    #expect(throws: WasmtimeError.callerExpired) {
+        _ = try caller.writeMemory(offset: 0, bytes: [1])
+    }
 }
 
 @Test func componentLinkerInstantiatesAndCallsZeroParameterZeroResultFunctions() throws {
@@ -1085,6 +1121,7 @@ import Testing
     #expect(WasmtimeError.api(message: "bad", exitStatus: nil).description == "bad")
     #expect(WasmtimeError.unsupportedValueKind(99).description == "unsupported Wasmtime value kind: 99")
     #expect(WasmtimeError.wrongExportKind(name: "x", expected: "func", actual: "global").description == "export x is global, expected func")
+    #expect(WasmtimeError.callerExpired.description == "caller is only valid during host function execution")
 }
 
 @Test func internalConversionsHandleUnsupportedValuesAndOwnedErrors() throws {
@@ -1124,6 +1161,23 @@ private final class LockedOutputBuffer: @unchecked Sendable {
     func string() -> String {
         lock.withLock {
             String(decoding: bytes, as: UTF8.self)
+        }
+    }
+}
+
+private final class LockedCallerBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var caller: Caller?
+
+    func set(_ caller: Caller) {
+        lock.withLock {
+            self.caller = caller
+        }
+    }
+
+    func get() -> Caller? {
+        lock.withLock {
+            caller
         }
     }
 }

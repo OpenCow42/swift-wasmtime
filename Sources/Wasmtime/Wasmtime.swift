@@ -424,14 +424,14 @@ public final class Instance {
 }
 
 public final class Caller {
-    private let raw: OpaquePointer?
+    private let state: CallerState
 
     init(raw: OpaquePointer?) {
-        self.raw = raw
+        self.state = CallerState(raw: raw)
     }
 
-    public func exportKind(named name: String) -> ExternKind? {
-        guard let raw else {
+    public func exportKind(named name: String) throws -> ExternKind? {
+        guard let raw = try state.currentRaw() else {
             return nil
         }
 
@@ -450,7 +450,7 @@ public final class Caller {
         guard offset >= 0, length >= 0 else {
             throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: length, memorySize: 0)
         }
-        guard let raw, var memory = exportedMemory(named: name, caller: raw) else {
+        guard let raw = try state.currentRaw(), var memory = exportedMemory(named: name, caller: raw) else {
             return nil
         }
         let context = wasmtime_caller_context(raw)
@@ -468,7 +468,7 @@ public final class Caller {
         guard offset >= 0 else {
             throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: bytes.count, memorySize: 0)
         }
-        guard let raw, var memory = exportedMemory(named: name, caller: raw) else {
+        guard let raw = try state.currentRaw(), var memory = exportedMemory(named: name, caller: raw) else {
             return false
         }
         let context = wasmtime_caller_context(raw)
@@ -500,6 +500,10 @@ public final class Caller {
             return nil // coverage:ignore wasmtime_caller_export_get currently returns only memories
         }
         return item.of.memory
+    }
+
+    func invalidate() {
+        state.invalidate()
     }
 }
 
@@ -578,14 +582,14 @@ public final class Linker {
         }
     }
 
-    public func define(store: Store, module: String, name: String, function: Func) throws {
+    public func define(module: String, name: String, function: Func) throws {
         var item = wasmtime_extern_t()
         item.kind = wasmtime_extern_kind_t(WASMTIME_EXTERN_FUNC)
         item.of.func = function.raw
         try module.withCString { cModule in
             try name.withCString { cName in
                 try WasmtimeError.throwIfNeeded(
-                    wasmtime_linker_define(raw, store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
+                    wasmtime_linker_define(raw, function.store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
                 )
             }
         }
@@ -688,7 +692,7 @@ public final class ComponentLinker {
 }
 
 public final class Func {
-    private let store: Store
+    fileprivate let store: Store
     let raw: wasmtime_func_t
 
     public init(
@@ -1358,7 +1362,7 @@ public enum Value: Sendable, Equatable, CustomStringConvertible {
     }
 }
 
-public typealias HostFunction = (_ caller: Caller, _ arguments: [Value]) throws -> [Value]
+public typealias HostFunction = @Sendable (_ caller: Caller, _ arguments: [Value]) throws -> [Value]
 public typealias SendableHostFunction = @Sendable (_ arguments: [Value]) throws -> [Value]
 
 public struct RuntimeHostFunction: Sendable {
@@ -1424,6 +1428,7 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
     case unsupportedValueKind(Int)
     case wasiConfigurationFailed(String)
     case memoryAccessOutOfBounds(offset: Int, length: Int, memorySize: Int)
+    case callerExpired
 
     public var description: String {
         switch self {
@@ -1448,6 +1453,8 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
             return "unsupported Wasmtime value kind: \(kind)"
         case .memoryAccessOutOfBounds(let offset, let length, let memorySize):
             return "memory access out of bounds: offset \(offset), length \(length), memory size \(memorySize)"
+        case .callerExpired:
+            return "caller is only valid during host function execution"
         }
     }
 
@@ -1491,7 +1498,7 @@ public enum ExternKind: Sendable, Equatable, CustomStringConvertible {
     case memory
     case sharedMemory
     case tag
-    case unknown(wasmtime_extern_kind_t)
+    case unknown(UInt8)
 
     init(rawValue: wasmtime_extern_kind_t) {
         switch rawValue {
@@ -1501,7 +1508,7 @@ public enum ExternKind: Sendable, Equatable, CustomStringConvertible {
         case wasmtime_extern_kind_t(WASMTIME_EXTERN_MEMORY): self = .memory
         case wasmtime_extern_kind_t(WASMTIME_EXTERN_SHAREDMEMORY): self = .sharedMemory
         case wasmtime_extern_kind_t(WASMTIME_EXTERN_TAG): self = .tag
-        default: self = .unknown(rawValue)
+        default: self = .unknown(UInt8(rawValue))
         }
     }
 
@@ -1528,6 +1535,32 @@ private final class HostFunctionBox {
     }
 }
 
+private final class CallerState {
+    private let lock = NSLock()
+    private var raw: OpaquePointer?
+    private var isExpired = false
+
+    init(raw: OpaquePointer?) {
+        self.raw = raw
+    }
+
+    func currentRaw() throws -> OpaquePointer? {
+        try lock.withLock {
+            guard !isExpired else {
+                throw WasmtimeError.callerExpired
+            }
+            return raw
+        }
+    }
+
+    func invalidate() {
+        lock.withLock {
+            isExpired = true
+            raw = nil
+        }
+    }
+}
+
 private let hostFunctionCallback: wasmtime_func_callback_t = { data, caller, args, nargs, results, nresults in
     guard let data else {
         return makeHostTrap("missing host function data") // coverage:ignore defensive C callback invariant
@@ -1536,7 +1569,9 @@ private let hostFunctionCallback: wasmtime_func_callback_t = { data, caller, arg
     let box = Unmanaged<HostFunctionBox>.fromOpaque(data).takeUnretainedValue()
     do {
         let arguments = try convertHostArguments(args, count: nargs)
-        let values = try box.body(Caller(raw: caller), arguments)
+        let caller = Caller(raw: caller)
+        defer { caller.invalidate() }
+        let values = try box.body(caller, arguments)
         guard values.count == nresults else {
             return makeHostTrap("host function returned \(values.count) results, expected \(nresults)")
         }
