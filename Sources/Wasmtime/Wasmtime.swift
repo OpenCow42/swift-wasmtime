@@ -640,14 +640,239 @@ public final class Global {
     }
 }
 
+/// Reference kind stored by a WebAssembly table.
+///
+/// This package currently models `funcref` and `externref` table types. Full
+/// non-null `externref` payloads are intentionally left for broader reference
+/// value support.
+public enum TableElementKind: Sendable, Equatable, CustomStringConvertible {
+    case functionReference
+    case externalReference
+    case unknown(UInt8)
+
+    var wasmRawValue: wasm_valkind_t {
+        switch self {
+        case .functionReference: wasm_valkind_t(WASM_FUNCREF.rawValue)
+        case .externalReference: wasm_valkind_t(WASM_EXTERNREF.rawValue)
+        case .unknown(let value): wasm_valkind_t(value)
+        }
+    }
+
+    init(rawValue: wasm_valkind_t) {
+        switch rawValue {
+        case wasm_valkind_t(WASM_FUNCREF.rawValue):
+            self = .functionReference
+        case wasm_valkind_t(WASM_EXTERNREF.rawValue):
+            self = .externalReference
+        default:
+            self = .unknown(UInt8(rawValue))
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .functionReference: "funcref"
+        case .externalReference: "externref"
+        case .unknown(let value): "unknown(\(value))"
+        }
+    }
+}
+
+/// Table element values supported by this package's bounded table API.
+///
+/// `function` elements are store-bound through `Func`. Null `externref` values
+/// are supported, but non-null host externrefs are not exposed yet.
+public enum TableElement {
+    case nullFunctionReference
+    case function(Func)
+    case nullExternalReference
+
+    public var kind: TableElementKind {
+        switch self {
+        case .nullFunctionReference, .function:
+            .functionReference
+        case .nullExternalReference:
+            .externalReference
+        }
+    }
+
+    static func null(for kind: TableElementKind) throws -> TableElement {
+        switch kind {
+        case .functionReference:
+            return .nullFunctionReference
+        case .externalReference:
+            return .nullExternalReference
+        case .unknown(let value):
+            throw WasmtimeError.unsupportedValueKind(Int(value))
+        }
+    }
+
+    init(store: Store, rawValue: wasmtime_val_t) throws {
+        var rawValue = rawValue
+        switch rawValue.kind {
+        case wasmtime_valkind_t(WASMTIME_FUNCREF):
+            if wasmtime_funcref_is_null(&rawValue.of.funcref) {
+                self = .nullFunctionReference
+            } else {
+                self = .function(Func(store: store, raw: rawValue.of.funcref))
+            }
+        case wasmtime_valkind_t(WASMTIME_EXTERNREF):
+            guard wasmtime_externref_is_null(&rawValue.of.externref) else {
+                throw WasmtimeError.unsupportedValueKind(Int(rawValue.kind))
+            }
+            self = .nullExternalReference
+        default:
+            throw WasmtimeError.unsupportedValueKind(Int(rawValue.kind))
+        }
+    }
+
+    var rawValue: wasmtime_val_t {
+        var raw = wasmtime_val_t()
+        switch self {
+        case .nullFunctionReference:
+            raw.kind = wasmtime_valkind_t(WASMTIME_FUNCREF)
+            wasmtime_funcref_set_null(&raw.of.funcref)
+        case .function(let function):
+            raw.kind = wasmtime_valkind_t(WASMTIME_FUNCREF)
+            raw.of.funcref = function.raw
+        case .nullExternalReference:
+            raw.kind = wasmtime_valkind_t(WASMTIME_EXTERNREF)
+            wasmtime_externref_set_null(&raw.of.externref)
+        }
+        return raw
+    }
+}
+
+/// Immutable WebAssembly table type.
+///
+/// `TableType` is not store-bound and may be shared across Swift concurrency
+/// domains. It describes the reference kind and element limits used when
+/// creating a host table.
+public final class TableType: @unchecked Sendable {
+    let raw: OpaquePointer
+
+    public let element: TableElementKind
+    public let minimumElements: UInt32
+    public let maximumElements: UInt32?
+
+    public init(
+        element: TableElementKind = .functionReference,
+        minimumElements: UInt32,
+        maximumElements: UInt32? = nil
+    ) throws {
+        guard case .unknown(let value) = element else {
+            let valueType = wasm_valtype_new(element.wasmRawValue)
+            guard let valueType else { // coverage:ignore defensive C allocation failure
+                throw WasmtimeError.allocationFailed("wasm_valtype_new returned nil")
+            }
+            var limits = wasm_limits_t(min: minimumElements, max: maximumElements ?? wasm_limits_max_default)
+            guard let raw = wasm_tabletype_new(valueType, &limits) else { // coverage:ignore defensive C allocation failure
+                wasm_valtype_delete(valueType) // coverage:ignore defensive C allocation failure
+                throw WasmtimeError.allocationFailed("wasm_tabletype_new returned nil") // coverage:ignore defensive C allocation failure
+            }
+            self.raw = raw
+            self.element = element
+            self.minimumElements = minimumElements
+            self.maximumElements = maximumElements
+            return
+        }
+        throw WasmtimeError.unsupportedValueKind(Int(value))
+    }
+
+    init(raw: OpaquePointer) throws {
+        guard let elementType = wasm_tabletype_element(raw) else { // coverage:ignore defensive C invariant
+            wasm_tabletype_delete(raw) // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasm_tabletype_element returned nil") // coverage:ignore defensive C invariant
+        }
+        guard let limits = wasm_tabletype_limits(raw) else { // coverage:ignore defensive C invariant
+            wasm_tabletype_delete(raw) // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasm_tabletype_limits returned nil") // coverage:ignore defensive C invariant
+        }
+        self.raw = raw
+        self.element = TableElementKind(rawValue: wasm_valtype_kind(elementType))
+        self.minimumElements = limits.pointee.min
+        self.maximumElements = limits.pointee.max == wasm_limits_max_default ? nil : limits.pointee.max
+    }
+
+    deinit {
+        wasm_tabletype_delete(raw)
+    }
+}
+
+/// Store-bound WebAssembly table.
+///
+/// `Table` is not `Sendable`. Use it only on the serialized execution path
+/// that owns its `Store`. Arbitrary non-null `externref` payloads are not
+/// modeled yet; use null externrefs or function references.
+public final class Table {
+    fileprivate let store: Store
+    let raw: wasmtime_table_t
+
+    public init(store: Store, type: TableType, initialElement: TableElement? = nil) throws {
+        let initialElement = try initialElement ?? TableElement.null(for: type.element)
+        var rawElement = initialElement.rawValue
+        var table = wasmtime_table_t()
+        try WasmtimeError.throwIfNeeded(wasmtime_table_new(store.context, type.raw, &rawElement, &table))
+        self.store = store
+        self.raw = table
+    }
+
+    init(store: Store, raw: wasmtime_table_t) {
+        self.store = store
+        self.raw = raw
+    }
+
+    public func type() throws -> TableType {
+        var table = raw
+        guard let rawType = wasmtime_table_type(store.context, &table) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_table_type returned nil") // coverage:ignore defensive C invariant
+        }
+        return try TableType(raw: rawType)
+    }
+
+    public var size: UInt64 {
+        var table = raw
+        return wasmtime_table_size(store.context, &table)
+    }
+
+    public func get(index: UInt64) throws -> TableElement? {
+        var table = raw
+        var rawElement = wasmtime_val_t()
+        guard wasmtime_table_get(store.context, &table, index, &rawElement) else {
+            return nil
+        }
+        defer { wasmtime_val_unroot(&rawElement) }
+        return try TableElement(store: store, rawValue: rawElement)
+    }
+
+    public func set(index: UInt64, to element: TableElement) throws {
+        var table = raw
+        var rawElement = element.rawValue
+        try WasmtimeError.throwIfNeeded(wasmtime_table_set(store.context, &table, index, &rawElement))
+    }
+
+    @discardableResult
+    public func grow(by deltaElements: UInt64, initialElement: TableElement? = nil) throws -> UInt64 {
+        var table = raw
+        let initialElement = try initialElement ?? TableElement.null(for: type().element)
+        var rawElement = initialElement.rawValue
+        var previousSize: UInt64 = 0
+        try WasmtimeError.throwIfNeeded(
+            wasmtime_table_grow(store.context, &table, deltaElements, &rawElement, &previousSize)
+        )
+        return previousSize
+    }
+}
+
 /// Store-bound extern item exported by an instance or found in a linker.
 ///
-/// Functions, globals, and memories have first-class wrappers today. Other
-/// extern kinds are surfaced as `unsupported` until their safe Swift wrappers
-/// land.
+/// Functions, globals, tables, and memories have first-class wrappers today.
+/// Other extern kinds are surfaced as `unsupported` until their safe Swift
+/// wrappers land.
 public enum Extern {
     case function(Func)
     case global(Global)
+    case table(Table)
     case memory(Memory)
     case unsupported(ExternKind)
 
@@ -655,6 +880,7 @@ public enum Extern {
         switch self {
         case .function: .function
         case .global: .global
+        case .table: .table
         case .memory: .memory
         case .unsupported(let kind): kind
         }
@@ -666,6 +892,8 @@ public enum Extern {
             self = .function(Func(store: store, raw: item.of.func))
         case wasmtime_extern_kind_t(WASMTIME_EXTERN_GLOBAL):
             self = .global(Global(store: store, raw: item.of.global))
+        case wasmtime_extern_kind_t(WASMTIME_EXTERN_TABLE):
+            self = .table(Table(store: store, raw: item.of.table))
         case wasmtime_extern_kind_t(WASMTIME_EXTERN_MEMORY):
             self = .memory(Memory(store: store, raw: item.of.memory))
         default:
@@ -903,6 +1131,15 @@ public final class Instance {
         }
 
         return global
+    }
+
+    public func exportedTable(named name: String) throws -> Table {
+        let item = try export(named: name)
+        guard case .table(let table) = item else {
+            throw WasmtimeError.wrongExportKind(name: name, expected: "table", actual: item.kind.description)
+        }
+
+        return table
     }
 
     public func exportedMemory(named name: String = "memory") throws -> Memory {
@@ -1159,6 +1396,23 @@ public final class Linker {
             try name.withCString { cName in
                 try WasmtimeError.throwIfNeeded(
                     wasmtime_linker_define(raw, global.store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
+                )
+            }
+        }
+    }
+
+    /// Defines an already-created store-bound table in this linker.
+    ///
+    /// The table remains bound to the store that created it. The linker uses
+    /// that store automatically when registering the extern.
+    public func define(module: String, name: String, table: Table) throws {
+        var item = wasmtime_extern_t()
+        item.kind = wasmtime_extern_kind_t(WASMTIME_EXTERN_TABLE)
+        item.of.table = table.raw
+        try module.withCString { cModule in
+            try name.withCString { cName in
+                try WasmtimeError.throwIfNeeded(
+                    wasmtime_linker_define(raw, table.store.context, cModule, strlen(cModule), cName, strlen(cName), &item)
                 )
             }
         }

@@ -15,6 +15,8 @@ import Testing
     acceptsSendable(CraneliftOptimizationLevel.speed)
     acceptsSendable(try MemoryType(minimumPages: 0))
     acceptsSendable(try GlobalType(content: .i32))
+    acceptsSendable(try TableType(minimumElements: 0))
+    acceptsSendable(TableElementKind.functionReference)
     acceptsSendable(ValueKind.i32)
     acceptsSendable(FunctionType(parameters: [.i32], results: [.i64]))
     acceptsSendable(Value.i32(1))
@@ -577,21 +579,221 @@ import Testing
         Issue.record("expected global extern")
     }
 
-    let unsupported = try instance.export(named: "table")
-    #expect(unsupported.kind == .table)
-    switch unsupported {
-    case .unsupported(.table):
-        break
+    switch try instance.export(named: "table") {
+    case .table(let table):
+        #expect(table.size == 1)
     default:
-        Issue.record("expected unsupported table extern")
+        Issue.record("expected table extern")
     }
 
     let global = try instance.exportedGlobal(named: "global")
     #expect(try global.get() == .i32(7))
+    let table = try instance.exportedTable(named: "table")
+    #expect(table.size == 1)
 
     try expectSpecificError(.missingExport("missing")) {
         _ = try instance.export(named: "missing")
     }
+}
+
+@Test func tablesExposeTypeSizeNullElementsAndGrowth() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (table (export "table") 1 3 funcref))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+    let table = try instance.exportedTable(named: "table")
+
+    let tableType = try table.type()
+    #expect(tableType.element == .functionReference)
+    #expect(tableType.element.description == "funcref")
+    #expect(tableType.minimumElements == 1)
+    #expect(tableType.maximumElements == 3)
+    #expect(table.size == 1)
+    #expect(try table.get(index: 1) == nil)
+
+    switch try table.get(index: 0) {
+    case .nullFunctionReference:
+        break
+    default:
+        Issue.record("expected null funcref element")
+    }
+
+    #expect(try table.grow(by: 1) == 1)
+    #expect(table.size == 2)
+    switch try table.get(index: 1) {
+    case .nullFunctionReference:
+        break
+    default:
+        Issue.record("expected grown null funcref element")
+    }
+
+    try expectWasmtimeError {
+        try table.grow(by: 2)
+    }
+}
+
+@Test func tablesCanStoreAndLoadFunctionReferences() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (table (export "table") 1 funcref)
+          (func (export "answer") (result i32)
+            i32.const 42))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+    let table = try instance.exportedTable(named: "table")
+    let answer = try instance.exportedFunction(named: "answer")
+
+    let functionElement = TableElement.function(answer)
+    #expect(functionElement.kind == .functionReference)
+    try table.set(index: 0, to: functionElement)
+
+    switch try table.get(index: 0) {
+    case .function(let function):
+        #expect(try function.call() == [.i32(42)])
+    default:
+        Issue.record("expected function reference element")
+    }
+
+    try table.set(index: 0, to: .nullFunctionReference)
+    switch try table.get(index: 0) {
+    case .nullFunctionReference:
+        break
+    default:
+        Issue.record("expected reset null funcref element")
+    }
+}
+
+@Test func externalReferenceTablesSupportNullElementsOnly() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let tableType = try TableType(element: .externalReference, minimumElements: 1)
+    let table = try Table(store: store, type: tableType)
+
+    #expect(tableType.element == .externalReference)
+    #expect(tableType.element.description == "externref")
+    #expect(tableType.minimumElements == 1)
+    #expect(tableType.maximumElements == nil)
+    #expect(table.size == 1)
+
+    let reflectedType = try table.type()
+    #expect(reflectedType.element == .externalReference)
+    #expect(reflectedType.minimumElements == 1)
+    #expect(reflectedType.maximumElements == nil)
+
+    let nullExternal = TableElement.nullExternalReference
+    #expect(nullExternal.kind == .externalReference)
+    switch try table.get(index: 0) {
+    case .nullExternalReference:
+        break
+    default:
+        Issue.record("expected null externref element")
+    }
+
+    try table.set(index: 0, to: nullExternal)
+    #expect(try table.grow(by: 1, initialElement: nullExternal) == 1)
+    #expect(table.size == 2)
+
+    try expectWasmtimeError {
+        try table.set(index: 0, to: .nullFunctionReference)
+    }
+}
+
+@Test func tableUnsupportedElementKindsReportErrors() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let unknownKind = TableElementKind(rawValue: 255)
+
+    #expect(unknownKind == .unknown(255))
+    #expect(unknownKind.description == "unknown(255)")
+    try expectSpecificError(.unsupportedValueKind(255)) {
+        _ = try TableElement.null(for: unknownKind)
+    }
+    try expectSpecificError(.unsupportedValueKind(255)) {
+        _ = try TableType(element: unknownKind, minimumElements: 1)
+    }
+
+    var rawValue = wasmtime_val_t()
+    rawValue.kind = 99
+    try expectSpecificError(.unsupportedValueKind(99)) {
+        _ = try TableElement(store: store, rawValue: rawValue)
+    }
+}
+
+@Test func tablesReportMissingAndWrongKindExports() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (global (export "global") i32 (i32.const 1))
+          (func (export "run"))
+          (memory (export "memory") 1))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+
+    try expectSpecificError(.missingExport("missing")) {
+        _ = try instance.exportedTable(named: "missing")
+    }
+    do {
+        _ = try instance.exportedTable(named: "run")
+        Issue.record("expected wrong export kind")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("expected table"))
+    }
+    do {
+        _ = try instance.exportedTable(named: "memory")
+        Issue.record("expected wrong export kind")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("is memory"))
+    }
+    do {
+        _ = try instance.exportedTable(named: "global")
+        Issue.record("expected wrong export kind")
+    } catch let error as WasmtimeError {
+        #expect(error.description.contains("is global"))
+    }
+}
+
+@Test func linkerDefinesAndGetsStoreBoundTables() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let table = try Table(
+        store: store,
+        type: TableType(element: .functionReference, minimumElements: 1, maximumElements: 2)
+    )
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "table" (table 1 2 funcref)))
+        """
+    )
+    let linker = try Linker(engine: engine)
+    try linker.define(module: "host", name: "table", table: table)
+
+    switch try #require(linker.get(store: store, module: "host", name: "table")) {
+    case .table(let linkedTable):
+        #expect(linkedTable.size == 1)
+        #expect(try linkedTable.grow(by: 1) == 1)
+    default:
+        Issue.record("expected table extern")
+    }
+
+    _ = try linker.instantiate(store: store, module: module)
+    #expect(table.size == 2)
 }
 
 @Test func linkerDefinesStoreBoundMemories() throws {
@@ -1634,11 +1836,43 @@ import Testing
 }
 
 @Test func internalConversionsHandleUnsupportedValuesAndOwnedErrors() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+
     var rawValue = wasmtime_val_t()
     rawValue.kind = 99
     try expectSpecificError(.unsupportedValueKind(99)) {
         _ = try Value(rawValue: rawValue)
     }
+
+    let unknownTableElementKind = TableElementKind(rawValue: 77)
+    #expect(unknownTableElementKind == .unknown(77))
+    #expect(unknownTableElementKind.wasmRawValue == 77)
+    #expect(unknownTableElementKind.description == "unknown(77)")
+    try expectSpecificError(.unsupportedValueKind(77)) {
+        _ = try TableElement.null(for: unknownTableElementKind)
+    }
+    try expectSpecificError(.unsupportedValueKind(77)) {
+        _ = try TableType(element: unknownTableElementKind, minimumElements: 0)
+    }
+
+    var rawUnsupportedTableElement = wasmtime_val_t()
+    rawUnsupportedTableElement.kind = wasmtime_valkind_t(WASMTIME_I32)
+    try expectSpecificError(.unsupportedValueKind(Int(WASMTIME_I32))) {
+        _ = try TableElement(store: store, rawValue: rawUnsupportedTableElement)
+    }
+
+    var rawNonNullExternReference = wasmtime_val_t()
+    rawNonNullExternReference.kind = wasmtime_valkind_t(WASMTIME_EXTERNREF)
+    rawNonNullExternReference.of.externref.store_id = 1
+    try expectSpecificError(.unsupportedValueKind(Int(WASMTIME_EXTERNREF))) {
+        _ = try TableElement(store: store, rawValue: rawNonNullExternReference)
+    }
+
+    var rawUnsupportedExtern = wasmtime_extern_t()
+    rawUnsupportedExtern.kind = wasmtime_extern_kind_t(WASMTIME_EXTERN_TAG)
+    let unsupportedExtern = Extern(store: store, raw: rawUnsupportedExtern)
+    #expect(unsupportedExtern.kind == .tag)
 
     let manualError = try #require(wasmtime_error_new("manual error"))
     #expect(WasmtimeError.fromOwned(manualError).description == "manual error")

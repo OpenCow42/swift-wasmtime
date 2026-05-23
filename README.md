@@ -22,8 +22,9 @@ source target.
 ## Current Scope
 
 - Core runtime wrappers: `Config`, `Engine`, `Store`, `Module`, `Instance`,
-  `Linker`, `Extern`, `Func`, `GlobalType`, `Global`, `MemoryType`, `Memory`,
-  `Value`, `Trap`, `WasmtimeError`, and `WasiConfig`.
+  `Linker`, `Extern`, `Func`, `GlobalType`, `Global`, `TableElementKind`,
+  `TableElement`, `TableType`, `Table`, `MemoryType`, `Memory`, `Value`,
+  `Trap`, `WasmtimeError`, and `WasiConfig`.
 - Swift 6 thread-safe surface: `EngineOptions` for sendable engine
   configuration, `WasiOptions` for sendable WASI configuration, and
   `WasmtimeRuntime` for actor-serialized store execution.
@@ -49,16 +50,19 @@ source target.
   `WasmtimeRuntime` memory helpers.
 - Numeric scalar global support through `GlobalType`, `Global`, exported global
   lookup, immutable and mutable global reads/writes, and linker-defined globals.
+- Table support through `TableType`, `Table`, exported table lookup, table size,
+  table growth, linker-defined tables, function references, and null
+  `funcref`/`externref` elements. Arbitrary non-null host `externref` payloads
+  are intentionally deferred until broader reference value modeling exists.
 - General extern lookup through `Instance.export(named:)`, `Extern`, and
-  `Linker.get(store:module:name:)`. Functions, globals, and memories have
-  first-class wrappers today; tables, tags, and shared memories are reported by
+  `Linker.get(store:module:name:)`. Functions, globals, tables, and memories
+  have first-class wrappers today; tags and shared memories are reported by
   kind until their dedicated wrappers land.
 - Linker support for WASI registration, import shadowing, host functions,
   store-bound functions, defining unknown imports as traps or default values,
   store-bound globals and memories, defining an instantiated module namespace,
   registering a module by name, and instantiating modules through that linker.
-  The remaining low-level extern definition surface for tables and tags is not
-  exposed yet.
+  The remaining low-level extern definition surface for tags is not exposed yet.
 - Vendored Wasmtime version: `v44.0.1`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
 

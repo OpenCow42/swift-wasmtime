@@ -58,10 +58,10 @@ actor-isolated `WasmtimeRuntime` methods.
 
 ### General Extern Wrappers
 
-The package exposes generic extern lookup, but tables, tags, and shared memories
-do not have first-class safe wrappers yet.
+The package exposes generic extern lookup, but tags and shared memories do not
+have first-class safe wrappers yet.
 
-- Public `Linker.define` overloads for tables and tags.
+- Public `Linker.define` overloads for tags.
 - Public export-by-index support via `wasmtime_instance_export_nth`.
 - Shared-memory externs are tracked separately below.
 
@@ -78,15 +78,17 @@ Remaining global-related gaps:
 
 ### Tables
 
-Missing table type and table wrappers:
+Table metadata, size, growth, exported table lookup, linker-defined tables,
+function references, and null `funcref`/`externref` elements are covered by
+`TableElementKind`, `TableElement`, `TableType`, `Table`,
+`Instance.exportedTable(named:)`, `Extern.table`, and
+`Linker.define(module:name:table:)`.
 
-- `wasmtime_table_new`
-- `wasmtime_table_type`
-- `wasmtime_table_get`
-- `wasmtime_table_set`
-- `wasmtime_table_size`
-- `wasmtime_table_grow`
-- Standard C API table type helpers from `wasm.h`.
+Remaining table-related gaps:
+
+- Non-null host `externref` payload creation and inspection.
+- Broader GC/reference table element kinds beyond `funcref` and `externref`.
+- Actor-isolated table helpers on `WasmtimeRuntime`.
 
 ### Tags And Exceptions
 
