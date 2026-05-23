@@ -303,6 +303,42 @@ import Testing
     #expect(try String(contentsOf: stdout, encoding: .utf8) == "runtime-wasi\n")
 }
 
+@Test func runtimeActorInstantiatesWithUnknownImportHelpers() async throws {
+    let runtime = try WasmtimeRuntime()
+    let defaultModule = try await runtime.compileModule(
+        wat: """
+        (module
+          (import "env" "answer" (func $answer (result i32)))
+          (func (export "run") (result i32)
+            call $answer))
+        """
+    )
+    let defaultInstance = try await runtime.instantiateWithLinker(
+        defaultModule,
+        defineUnknownImportsAsDefaultValues: true
+    )
+    #expect(try await runtime.call("run", in: defaultInstance) == [.i32(0)])
+
+    let trapModule = try await runtime.compileModule(
+        wat: """
+        (module
+          (import "env" "missing" (func $missing))
+          (func (export "run")
+            call $missing))
+        """
+    )
+    let trapInstance = try await runtime.instantiateWithLinker(
+        trapModule,
+        defineUnknownImportsAsTraps: true
+    )
+    do {
+        _ = try await runtime.call("run", in: trapInstance)
+        Issue.record("expected unknown-import trap")
+    } catch WasmtimeError.api(let message, nil) {
+        #expect(message.contains("unknown import"))
+    }
+}
+
 @Test func runtimeActorCompilesInstantiatesAndCallsComponents() async throws {
     let runtime = try WasmtimeRuntime(options: EngineOptions(isComponentModelEnabled: true))
     let componentBytes = try WasmText.compile(componentRunWat)
@@ -474,6 +510,78 @@ import Testing
     wasi.inheritStandardError()
     try store.setWasi(wasi)
     try linker.defineWasi()
+}
+
+@Test func linkerDefinesUnknownImportsAsTrapsAndDefaultValues() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let trapModule = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "env" "missing" (func $missing))
+          (func (export "run")
+            call $missing))
+        """
+    )
+    let trapLinker = try Linker(engine: engine)
+    try trapLinker.defineUnknownImportsAsTraps(module: trapModule)
+    let trapInstance = try trapLinker.instantiate(store: store, module: trapModule)
+
+    do {
+        _ = try trapInstance.exportedFunction(named: "run").call()
+        Issue.record("expected trap")
+    } catch WasmtimeError.api(let message, nil) {
+        #expect(message.contains("unknown import"))
+    }
+
+    let defaultModule = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "env" "answer" (func $answer (result i32)))
+          (func (export "run") (result i32)
+            call $answer))
+        """
+    )
+    let defaultLinker = try Linker(engine: engine)
+    try defaultLinker.defineUnknownImportsAsDefaultValues(store: store, module: defaultModule)
+    let defaultInstance = try defaultLinker.instantiate(store: store, module: defaultModule)
+
+    #expect(try defaultInstance.exportedFunction(named: "run").call() == [.i32(0)])
+}
+
+@Test func linkerDefinesInstancesAndModulesByName() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let providerModule = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (func (export "answer") (result i32)
+            i32.const 42))
+        """
+    )
+    let consumerModule = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "provider" "answer" (func $answer (result i32)))
+          (func (export "run") (result i32)
+            call $answer))
+        """
+    )
+
+    let providerInstance = try Instance(store: store, module: providerModule)
+    let instanceLinker = try Linker(engine: engine)
+    try instanceLinker.defineInstance(store: store, name: "provider", instance: providerInstance)
+    let instanceConsumer = try instanceLinker.instantiate(store: store, module: consumerModule)
+    #expect(try instanceConsumer.exportedFunction(named: "run").call() == [.i32(42)])
+
+    let moduleLinker = try Linker(engine: engine)
+    try moduleLinker.defineModule(store: store, name: "provider", module: providerModule)
+    let moduleConsumer = try moduleLinker.instantiate(store: store, module: consumerModule)
+    #expect(try moduleConsumer.exportedFunction(named: "run").call() == [.i32(42)])
 }
 
 @Test func componentLinkerInstantiatesAndCallsZeroParameterZeroResultFunctions() throws {

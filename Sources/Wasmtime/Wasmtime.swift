@@ -473,6 +473,31 @@ public final class Linker {
         try WasmtimeError.throwIfNeeded(wasmtime_linker_define_wasi(raw))
     }
 
+    public func defineUnknownImportsAsTraps(module: Module) throws {
+        try WasmtimeError.throwIfNeeded(wasmtime_linker_define_unknown_imports_as_traps(raw, module.raw))
+    }
+
+    public func defineUnknownImportsAsDefaultValues(store: Store, module: Module) throws {
+        try WasmtimeError.throwIfNeeded(wasmtime_linker_define_unknown_imports_as_default_values(raw, store.context, module.raw))
+    }
+
+    public func defineInstance(store: Store, name: String, instance: Instance) throws {
+        var instance = instance.raw
+        try name.withCString { cName in
+            try WasmtimeError.throwIfNeeded(
+                wasmtime_linker_define_instance(raw, store.context, cName, strlen(cName), &instance)
+            )
+        }
+    }
+
+    public func defineModule(store: Store, name: String, module: Module) throws {
+        try name.withCString { cName in
+            try WasmtimeError.throwIfNeeded(
+                wasmtime_linker_module(raw, store.context, cName, strlen(cName), module.raw)
+            )
+        }
+    }
+
     public func instantiate(store: Store, module: Module) throws -> Instance {
         var instance = wasmtime_instance_t()
         var trap: OpaquePointer?
@@ -690,12 +715,20 @@ public actor WasmtimeRuntime {
     public func instantiateWithLinker(
         _ module: Module,
         allowsShadowing: Bool = false,
-        defineWasi: Bool = false
+        defineWasi: Bool = false,
+        defineUnknownImportsAsTraps: Bool = false,
+        defineUnknownImportsAsDefaultValues: Bool = false
     ) throws -> RuntimeInstanceID {
         let linker = try Linker(engine: engine)
         linker.allowsShadowing = allowsShadowing
         if defineWasi {
             try linker.defineWasi()
+        }
+        if defineUnknownImportsAsTraps {
+            try linker.defineUnknownImportsAsTraps(module: module)
+        }
+        if defineUnknownImportsAsDefaultValues {
+            try linker.defineUnknownImportsAsDefaultValues(store: store, module: module)
         }
         let instance = try linker.instantiate(store: store, module: module)
         let id = RuntimeInstanceID(rawValue: nextInstanceID)

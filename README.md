@@ -36,9 +36,15 @@ source target.
 - Module compilation from Wasm bytes, `Data`, or WAT text via Wasmtime's
   `wat2wasm` C API.
 - Direct instantiation, linker instantiation, exported function lookup, scalar
-  calls for `i32`, `i64`, `f32`, and `f64`, trap/error conversion, and basic
-  WASI configuration including arguments, environment, stdio files, stdin bytes,
+  calls for `i32`, `i64`, `f32`, and `f64`, trap/error conversion, and WASI
+  configuration including arguments, environment, stdio files, stdin bytes,
   stdout/stderr callbacks, and preopened directories.
+- Linker support is intentionally narrow today: WASI registration, import
+  shadowing, defining unknown imports as traps or default values, defining an
+  instantiated module namespace, registering a module by name, and
+  instantiating modules through that linker. Arbitrary host functions and the
+  full low-level extern definition surface of Wasmtime's C API are not exposed
+  yet.
 - Vendored Wasmtime version: `v44.0.1`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
 
@@ -158,7 +164,11 @@ let wasi = WasiOptions(
 )
 try await runtime.setWasi(wasi)
 
-let linked = try await runtime.instantiateWithLinker(module, defineWasi: true)
+let linked = try await runtime.instantiateWithLinker(
+    module,
+    defineWasi: true,
+    defineUnknownImportsAsDefaultValues: false
+)
 try await runtime.call("_start", in: linked)
 
 let componentRuntime = try WasmtimeRuntime(
