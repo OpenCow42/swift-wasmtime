@@ -1,5 +1,10 @@
 # Swift Wasmtime
 
+[![Swift Package Index](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FOpenCow42%2Fswift-wasmtime%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/OpenCow42/swift-wasmtime)
+[![Swift Package Index](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2FOpenCow42%2Fswift-wasmtime%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/OpenCow42/swift-wasmtime)
+
+🪟 Windows is supported alongside macOS and Linux.
+
 Swift Wasmtime is a SwiftPM wrapper around the official Wasmtime C API. The
 package vendors Wasmtime C API libraries for macOS, Linux, and Windows, exposes a
 small Swift 6 API, and keeps the C ownership rules explicit.
