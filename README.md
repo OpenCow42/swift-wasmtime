@@ -1,7 +1,7 @@
 # Swift Wasmtime
 
 Swift Wasmtime is a SwiftPM wrapper around the official Wasmtime C API. The
-package vendors Wasmtime C API static libraries for macOS and Linux, exposes a
+package vendors Wasmtime C API libraries for macOS, Linux, and Windows, exposes a
 small Swift 6 API, and keeps the C ownership rules explicit.
 
 ## Current Scope
@@ -64,6 +64,5 @@ scripts/vendor-wasmtime.sh v44.0.1
 ```
 
 The script downloads release metadata from GitHub, reads the official asset
-digests, downloads the four supported `*-c-api.tar.xz` archives, verifies
-SHA256 checksums, copies headers, and stores static libraries under
-`Vendor/Wasmtime`.
+digests, downloads the supported C API archives, verifies SHA256 checksums,
+copies headers, and stores platform libraries under `Vendor/Wasmtime`.

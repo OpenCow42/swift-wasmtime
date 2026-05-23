@@ -11,6 +11,8 @@ targets=(
   "x86_64-macos"
   "aarch64-linux"
   "x86_64-linux"
+  "aarch64-windows"
+  "x86_64-windows"
 )
 
 require() {
@@ -31,12 +33,13 @@ curl -fsSL "https://api.github.com/repos/${repo}/releases/tags/${version}" -o "$
 asset_field() {
   local target="$1"
   local field="$2"
-  python3 - "$release_json" "$version" "$target" "$field" <<'PY'
+  local extension="$3"
+  python3 - "$release_json" "$version" "$target" "$field" "$extension" <<'PY'
 import json
 import sys
 
-release_path, version, target, field = sys.argv[1:]
-name = f"wasmtime-{version}-{target}-c-api.tar.xz"
+release_path, version, target, field, extension = sys.argv[1:]
+name = f"wasmtime-{version}-{target}-c-api.{extension}"
 with open(release_path, encoding="utf-8") as handle:
     release = json.load(handle)
 for asset in release["assets"]:
@@ -48,9 +51,15 @@ PY
 }
 
 for target in "${targets[@]}"; do
-  archive="wasmtime-${version}-${target}-c-api.tar.xz"
-  url="$(asset_field "$target" browser_download_url)"
-  expected="$(asset_field "$target" digest)"
+  if [[ "$target" == *"-windows" ]]; then
+    extension="zip"
+  else
+    extension="tar.xz"
+  fi
+
+  archive="wasmtime-${version}-${target}-c-api.${extension}"
+  url="$(asset_field "$target" browser_download_url "$extension")"
+  expected="$(asset_field "$target" digest "$extension")"
   expected="${expected#sha256:}"
   archive_path="${work}/${archive}"
   extract_path="${work}/${target}"
@@ -66,10 +75,39 @@ for target in "${targets[@]}"; do
 
   rm -rf "$extract_path"
   mkdir -p "$extract_path"
-  tar -xf "$archive_path" -C "$extract_path" --strip-components 1
+  if [[ "$extension" == "zip" ]]; then
+    python3 - "$archive_path" "$extract_path" <<'PY'
+import sys
+import zipfile
+from pathlib import Path
+
+archive_path, extract_path = sys.argv[1:]
+root = Path(extract_path)
+with zipfile.ZipFile(archive_path) as archive:
+    for member in archive.infolist():
+        parts = Path(member.filename).parts
+        if len(parts) <= 1:
+            continue
+        destination = root.joinpath(*parts[1:])
+        if member.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+        else:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, destination.open("wb") as target:
+                target.write(source.read())
+PY
+  else
+    tar -xf "$archive_path" -C "$extract_path" --strip-components 1
+  fi
 
   mkdir -p "$root/Vendor/Wasmtime/${version}/${target}/lib"
-  cp "$extract_path/lib/libwasmtime.a" "$root/Vendor/Wasmtime/${version}/${target}/lib/libwasmtime.a"
+  if [[ "$target" == *"-windows" ]]; then
+    cp "$extract_path/lib/wasmtime.lib" "$root/Vendor/Wasmtime/${version}/${target}/lib/wasmtime.lib"
+    cp "$extract_path/lib/wasmtime.dll.lib" "$root/Vendor/Wasmtime/${version}/${target}/lib/wasmtime.dll.lib"
+    cp "$extract_path/lib/wasmtime.dll" "$root/Vendor/Wasmtime/${version}/${target}/lib/wasmtime.dll"
+  else
+    cp "$extract_path/lib/libwasmtime.a" "$root/Vendor/Wasmtime/${version}/${target}/lib/libwasmtime.a"
+  fi
 
   if [[ "$target" == "aarch64-macos" ]]; then
     rm -rf "$root/Sources/CWasmtime/include"

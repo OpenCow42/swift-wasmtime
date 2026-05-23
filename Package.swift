@@ -6,8 +6,10 @@ import PackageDescription
 let wasmtimeOS = "macos"
 #elseif os(Linux)
 let wasmtimeOS = "linux"
+#elseif os(Windows)
+let wasmtimeOS = "windows"
 #else
-#error("Wasmtime currently supports macOS and Linux")
+#error("Wasmtime currently supports macOS, Linux, and Windows")
 #endif
 
 #if arch(arm64)
@@ -46,6 +48,7 @@ let package = Package(
                 .linkedLibrary("pthread", .when(platforms: [.linux])),
                 .linkedLibrary("dl", .when(platforms: [.linux])),
                 .linkedLibrary("m", .when(platforms: [.linux])),
+                .linkedLibrary("ntdll", .when(platforms: [.windows])),
             ]
         ),
         .testTarget(
