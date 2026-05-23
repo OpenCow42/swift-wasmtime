@@ -48,6 +48,29 @@ source target.
 - Vendored Wasmtime version: `v44.0.1`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
 
+## Runtime Safety
+
+Prefer `WasmtimeRuntime` when values cross Swift concurrency domains. It keeps
+store-bound Wasmtime handles inside an actor and serializes access to the store.
+
+The lower-level wrappers mirror Wasmtime's C API more directly. `Config`,
+`Store`, `Instance`, `Linker`, `Func`, `WasiConfig`, and `Caller` are not
+`Sendable`; keep each store-bound object graph on one serialized execution path
+and do not call into it concurrently.
+
+Low-level handles should come from the same engine/store graph. For example, use
+a `Module` with a `Store` created from the same `Engine`, and use store-bound
+functions and instances only with the `Store` that owns them.
+
+`Config` and `WasiConfig` are consumed by `Engine.init(config:)` and
+`Store.setWasi(_:)` respectively. After consumption, using the same object again
+is a programmer error. Prefer `EngineOptions` and `WasiOptions` for reusable,
+sendable configuration values.
+
+The public API is still intentionally small and pre-release in spirit. Public
+enums such as `Value`, `ValueKind`, `WasmtimeError`, and `ExternKind` may gain
+cases as more Wasmtime C API surface is wrapped.
+
 ## Importing From SwiftPM
 
 Add the package dependency and point your target at the vendored Wasmtime library

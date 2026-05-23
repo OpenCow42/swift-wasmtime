@@ -7,6 +7,11 @@ import Glibc
 import Darwin
 #endif
 
+/// Low-level mutable engine configuration.
+///
+/// `Config` mirrors Wasmtime's C API builder object and is consumed by
+/// `Engine.init(config:)`. Do not use a `Config` again after passing it to an
+/// `Engine`; prefer `EngineOptions` for reusable, sendable configuration.
 public final class Config {
     private var raw: OpaquePointer?
 
@@ -161,6 +166,10 @@ public final class Config {
     }
 }
 
+/// Sendable engine configuration used by the actor-oriented API.
+///
+/// Use this value type when configuration must cross Swift concurrency domains.
+/// It is applied to an internal `Config` when constructing an `Engine`.
 public struct EngineOptions: Sendable, Equatable {
     public var isComponentModelEnabled: Bool
     public var isSIMDEnabled: Bool
@@ -236,6 +245,7 @@ public struct EngineOptions: Sendable, Equatable {
     }
 }
 
+/// Wasmtime compilation backend selection.
 public enum CompilationStrategy: Sendable, Equatable {
     case automatic
     case cranelift
@@ -248,6 +258,7 @@ public enum CompilationStrategy: Sendable, Equatable {
     }
 }
 
+/// Optimization level used by the Cranelift compiler backend.
 public enum CraneliftOptimizationLevel: Sendable, Equatable {
     case none
     case speed
@@ -262,6 +273,11 @@ public enum CraneliftOptimizationLevel: Sendable, Equatable {
     }
 }
 
+/// Wasmtime engine used to compile modules and create stores.
+///
+/// `Engine` is immutable after creation and may be shared across Swift
+/// concurrency domains. Use a single engine for modules and stores that need to
+/// interact.
 public final class Engine: @unchecked Sendable {
     let raw: OpaquePointer
 
@@ -290,6 +306,11 @@ public final class Engine: @unchecked Sendable {
     }
 }
 
+/// Low-level Wasmtime store wrapper.
+///
+/// `Store` owns store-bound Wasmtime objects such as instances and functions.
+/// It is not `Sendable`; serialize access yourself or use `WasmtimeRuntime`.
+/// Store-bound handles should only be used with the store that owns them.
 public final class Store {
     private let engine: Engine
     let raw: OpaquePointer
@@ -305,6 +326,10 @@ public final class Store {
         self.raw = raw
     }
 
+    /// Installs WASI configuration into this store.
+    ///
+    /// This consumes `config`. Do not use the same `WasiConfig` again after
+    /// calling this method. Prefer `WasiOptions` when possible.
     public func setWasi(_ config: WasiConfig) throws {
         try WasmtimeError.throwIfNeeded(wasmtime_context_set_wasi(context, config.release()))
     }
@@ -318,6 +343,11 @@ public final class Store {
     }
 }
 
+/// Compiled core WebAssembly module.
+///
+/// Modules are immutable after compilation and may be shared across Swift
+/// concurrency domains. Instantiate them with stores created from the same
+/// `Engine`.
 public final class Module: @unchecked Sendable {
     private let engine: Engine
     let raw: OpaquePointer
@@ -352,6 +382,11 @@ public final class Module: @unchecked Sendable {
     }
 }
 
+/// Compiled WebAssembly component.
+///
+/// Components are immutable after compilation and may be shared across Swift
+/// concurrency domains. Instantiate them with stores created from the same
+/// `Engine`.
 public final class Component: @unchecked Sendable {
     private let engine: Engine
     let raw: OpaquePointer
@@ -386,6 +421,10 @@ public final class Component: @unchecked Sendable {
     }
 }
 
+/// Store-bound core WebAssembly instance.
+///
+/// `Instance` is not `Sendable`. Use it only on the serialized execution path
+/// that owns its `Store`, or call through `WasmtimeRuntime`.
 public final class Instance {
     private let store: Store
     let raw: wasmtime_instance_t
@@ -423,6 +462,11 @@ public final class Instance {
     }
 }
 
+/// Temporary host-callback caller context.
+///
+/// `Caller` is only valid during the host function invocation that receives it.
+/// It expires when the callback returns. Copy data out of guest memory before
+/// returning, and do not store `Caller` for later use.
 public final class Caller {
     private let state: CallerState
 
@@ -430,6 +474,10 @@ public final class Caller {
         self.state = CallerState(raw: raw)
     }
 
+    /// Returns the kind of an export visible from the calling instance.
+    ///
+    /// Throws `WasmtimeError.callerExpired` if used after the host callback has
+    /// returned.
     public func exportKind(named name: String) throws -> ExternKind? {
         guard let raw = try state.currentRaw() else {
             return nil
@@ -446,6 +494,10 @@ public final class Caller {
         return ExternKind(rawValue: item.kind)
     }
 
+    /// Copies bytes from an exported memory visible from the calling instance.
+    ///
+    /// Returns `nil` when the export is missing or is not a memory. Throws when
+    /// the caller has expired or the requested range is out of bounds.
     public func readMemory(named name: String = "memory", offset: Int, length: Int) throws -> [UInt8]? {
         guard offset >= 0, length >= 0 else {
             throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: length, memorySize: 0)
@@ -464,6 +516,10 @@ public final class Caller {
         return Array(UnsafeBufferPointer(start: data.advanced(by: offset), count: length))
     }
 
+    /// Writes bytes to an exported memory visible from the calling instance.
+    ///
+    /// Returns `false` when the export is missing or is not a memory. Throws
+    /// when the caller has expired or the requested range is out of bounds.
     public func writeMemory(named name: String = "memory", offset: Int, bytes: [UInt8]) throws -> Bool {
         guard offset >= 0 else {
             throw WasmtimeError.memoryAccessOutOfBounds(offset: offset, length: bytes.count, memorySize: 0)
@@ -507,6 +563,10 @@ public final class Caller {
     }
 }
 
+/// Store-bound WebAssembly component instance.
+///
+/// `ComponentInstance` is not `Sendable`. Use it only on the serialized
+/// execution path that owns its `Store`, or call through `WasmtimeRuntime`.
 public final class ComponentInstance {
     private let store: Store
     let raw: wasmtime_component_instance_t
@@ -535,6 +595,10 @@ public final class ComponentInstance {
     }
 }
 
+/// Low-level name-based linker for core WebAssembly modules.
+///
+/// `Linker` is not `Sendable`. Use it on a serialized execution path with
+/// modules, stores, instances, and functions from the same engine/store graph.
 public final class Linker {
     private let engine: Engine
     let raw: OpaquePointer
@@ -582,6 +646,10 @@ public final class Linker {
         }
     }
 
+    /// Defines an already-created store-bound host function in this linker.
+    ///
+    /// The function remains bound to the store that created it. The linker uses
+    /// that store automatically when registering the extern.
     public func define(module: String, name: String, function: Func) throws {
         var item = wasmtime_extern_t()
         item.kind = wasmtime_extern_kind_t(WASMTIME_EXTERN_FUNC)
@@ -595,6 +663,11 @@ public final class Linker {
         }
     }
 
+    /// Defines a store-independent host function in this linker.
+    ///
+    /// The callback is `@Sendable` because linker-defined functions can be used
+    /// by multiple stores. Capture only thread-safe state or serialize access in
+    /// the callback.
     public func defineFunction(
         module: String,
         name: String,
@@ -653,6 +726,10 @@ public final class Linker {
     }
 }
 
+/// Low-level name-based linker for WebAssembly components.
+///
+/// `ComponentLinker` is not `Sendable`. Use it on a serialized execution path
+/// with components and stores from the same engine graph.
 public final class ComponentLinker {
     private let engine: Engine
     let raw: OpaquePointer
@@ -691,10 +768,18 @@ public final class ComponentLinker {
     }
 }
 
+/// Store-bound WebAssembly or host function.
+///
+/// `Func` is not `Sendable`. Call it only on the serialized execution path that
+/// owns its `Store`, or expose behavior through `WasmtimeRuntime`.
 public final class Func {
     fileprivate let store: Store
     let raw: wasmtime_func_t
 
+    /// Creates a store-bound host function.
+    ///
+    /// The callback receives a temporary `Caller` and typed scalar arguments.
+    /// It must return exactly the result values declared by `type`.
     public init(
         store: Store,
         type: FunctionType,
@@ -773,6 +858,10 @@ public final class Func {
     }
 }
 
+/// Store-bound exported component function.
+///
+/// `ComponentFunction` is not `Sendable`. Use it only on the serialized
+/// execution path that owns its `Store`, or call through `WasmtimeRuntime`.
 public final class ComponentFunction {
     private let store: Store
     let raw: wasmtime_component_func_t
@@ -790,6 +879,7 @@ public final class ComponentFunction {
     }
 }
 
+/// Sendable handle for an instance stored inside `WasmtimeRuntime`.
 public struct RuntimeInstanceID: Sendable, Hashable, CustomStringConvertible {
     public let rawValue: Int
 
@@ -802,6 +892,7 @@ public struct RuntimeInstanceID: Sendable, Hashable, CustomStringConvertible {
     }
 }
 
+/// Sendable handle for a component instance stored inside `WasmtimeRuntime`.
 public struct RuntimeComponentInstanceID: Sendable, Hashable, CustomStringConvertible {
     public let rawValue: Int
 
@@ -814,6 +905,10 @@ public struct RuntimeComponentInstanceID: Sendable, Hashable, CustomStringConver
     }
 }
 
+/// Actor-serialized runtime surface for Swift concurrency.
+///
+/// `WasmtimeRuntime` keeps non-`Sendable` Wasmtime store-bound handles inside
+/// the actor and exposes sendable identifiers and value types to callers.
 public actor WasmtimeRuntime {
     private let engine: Engine
     private let store: Store
@@ -956,6 +1051,11 @@ public actor WasmtimeRuntime {
     }
 }
 
+/// Low-level mutable WASI configuration.
+///
+/// `WasiConfig` mirrors Wasmtime's C API object and is consumed by
+/// `Store.setWasi(_:)`. Do not use a `WasiConfig` again after installing it in
+/// a store; prefer `WasiOptions` for reusable, sendable configuration.
 public final class WasiConfig {
     private var raw: OpaquePointer?
 
@@ -1094,8 +1194,16 @@ public final class WasiConfig {
     }
 }
 
+/// Handler used by custom WASI stdout and stderr streams.
+///
+/// Return the number of bytes accepted. The closure is `@Sendable`; capture only
+/// thread-safe state or serialize access yourself.
 public typealias WasiOutputHandler = @Sendable (Data) -> Int
 
+/// Sendable WASI configuration used by `WasmtimeRuntime`.
+///
+/// Use this reusable value type instead of `WasiConfig` when configuration
+/// needs to cross Swift concurrency domains.
 public struct WasiOptions: Sendable {
     public var arguments: [String]?
     public var inheritArguments: Bool
@@ -1197,6 +1305,7 @@ public struct WasiOptions: Sendable {
     }
 }
 
+/// Directory mapping exposed to WASI guests.
 public struct WasiPreopenedDirectory: Sendable, Equatable {
     public var hostPath: String
     public var guestPath: String
@@ -1216,6 +1325,7 @@ public struct WasiPreopenedDirectory: Sendable, Equatable {
     }
 }
 
+/// Directory-level permissions for a WASI preopened directory.
 public struct WasiDirectoryPermissions: OptionSet, Sendable, Hashable {
     public let rawValue: Int
 
@@ -1227,6 +1337,7 @@ public struct WasiDirectoryPermissions: OptionSet, Sendable, Hashable {
     public static let write = Self(rawValue: Int(WASMTIME_WASI_DIR_PERMS_WRITE.rawValue))
 }
 
+/// File-level permissions for files inside a WASI preopened directory.
 public struct WasiFilePermissions: OptionSet, Sendable, Hashable {
     public let rawValue: Int
 
@@ -1238,6 +1349,7 @@ public struct WasiFilePermissions: OptionSet, Sendable, Hashable {
     public static let write = Self(rawValue: Int(WASMTIME_WASI_FILE_PERMS_WRITE.rawValue))
 }
 
+/// Scalar WebAssembly value kinds supported by this package's checked call API.
 public enum ValueKind: Sendable, Equatable, CustomStringConvertible {
     case i32
     case i64
@@ -1263,6 +1375,7 @@ public enum ValueKind: Sendable, Equatable, CustomStringConvertible {
     }
 }
 
+/// Scalar function signature for host functions.
 public struct FunctionType: Sendable, Equatable {
     public var parameters: [ValueKind]
     public var results: [ValueKind]
@@ -1303,6 +1416,7 @@ public struct FunctionType: Sendable, Equatable {
     }
 }
 
+/// Scalar WebAssembly values supported by this package's checked call API.
 public enum Value: Sendable, Equatable, CustomStringConvertible {
     case i32(Int32)
     case i64(Int64)
@@ -1362,9 +1476,15 @@ public enum Value: Sendable, Equatable, CustomStringConvertible {
     }
 }
 
+/// Checked host function callback for low-level `Func` and `Linker` APIs.
+///
+/// The callback is `@Sendable`; capture only thread-safe state or serialize
+/// access yourself. The `Caller` is valid only for the current invocation.
 public typealias HostFunction = @Sendable (_ caller: Caller, _ arguments: [Value]) throws -> [Value]
+/// Checked host function callback for actor-managed runtime APIs.
 public typealias SendableHostFunction = @Sendable (_ arguments: [Value]) throws -> [Value]
 
+/// Sendable host-function definition for `WasmtimeRuntime`.
 public struct RuntimeHostFunction: Sendable {
     public var module: String
     public var name: String
@@ -1394,6 +1514,7 @@ public struct RuntimeHostFunction: Sendable {
     }
 }
 
+/// WebAssembly trap surfaced from guest execution.
 public struct Trap: Sendable, Equatable, CustomStringConvertible {
     public let message: String
     public let code: UInt8?
@@ -1417,6 +1538,9 @@ public struct Trap: Sendable, Equatable, CustomStringConvertible {
     }
 }
 
+/// Errors surfaced by the Swift Wasmtime wrapper.
+///
+/// This enum may gain cases as more Wasmtime API surface is wrapped.
 public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
     case api(message: String, exitStatus: Int32?)
     case trap(Trap)
@@ -1479,6 +1603,7 @@ public enum WasmtimeError: Error, Sendable, Equatable, CustomStringConvertible {
     }
 }
 
+/// Utility for compiling WebAssembly text format into binary bytes.
 public enum WasmText {
     public static func compile(_ wat: String) throws -> [UInt8] {
         var output = wasm_byte_vec_t()
@@ -1491,6 +1616,9 @@ public enum WasmText {
     }
 }
 
+/// Kind of an extern item exported by a Wasmtime instance or visible to a caller.
+///
+/// This enum may gain cases as more Wasmtime extern kinds are exposed.
 public enum ExternKind: Sendable, Equatable, CustomStringConvertible {
     case function
     case global
