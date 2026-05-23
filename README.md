@@ -42,9 +42,10 @@ source target.
 - Module compilation from Wasm bytes, `Data`, or WAT text via Wasmtime's
   `wat2wasm` C API.
 - Direct instantiation, linker instantiation, exported function lookup, scalar
-  calls for `i32`, `i64`, `f32`, and `f64`, trap/error conversion, and WASI
-  configuration including arguments, environment, stdio files, stdin bytes,
-  stdout/stderr callbacks, and preopened directories.
+  calls for `i32`, `i64`, `f32`, and `f64`, function signature introspection,
+  trap/error conversion, and WASI configuration including arguments,
+  environment, stdio files, stdin bytes, stdout/stderr callbacks, and
+  preopened directories.
 - Linear memory support through `MemoryType`, `Memory`, exported memory lookup,
   safe copy-based memory reads/writes, memory growth, and actor-isolated
   `WasmtimeRuntime` memory helpers.

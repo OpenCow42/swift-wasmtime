@@ -903,6 +903,7 @@ import Testing
 
     switch try #require(linker.get(store: store, module: "host", name: "answer")) {
     case .function(let function):
+        #expect(try function.type() == FunctionType(results: [.i32]))
         #expect(try function.call() == [.i32(42)])
     default:
         Issue.record("expected function extern")
@@ -1200,6 +1201,66 @@ import Testing
     #expect(try instance.exportedFunction(named: "nothing").call() == [])
 }
 
+@Test func functionsExposeScalarTypes() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (func (export "mix") (param i32 i64 f32 f64) (result i64 f32)
+            local.get 1
+            local.get 2))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+    let mix = try instance.exportedFunction(named: "mix")
+
+    #expect(try mix.type() == FunctionType(parameters: [.i32, .i64, .f32, .f64], results: [.i64, .f32]))
+
+    switch try instance.export(named: "mix") {
+    case .function(let function):
+        #expect(try function.type() == FunctionType(parameters: [.i32, .i64, .f32, .f64], results: [.i64, .f32]))
+    default:
+        Issue.record("expected function extern")
+    }
+}
+
+@Test func hostFunctionsExposeDeclaredTypes() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let type = FunctionType(parameters: [.i32, .i64], results: [.i64])
+    let function = try Func(store: store, type: type) { _, arguments in
+        guard case .i64(let value) = arguments[1] else {
+            return [.i64(0)]
+        }
+        return [.i64(value)]
+    }
+
+    #expect(try function.type() == type)
+    #expect(try function.call([.i32(1), .i64(2)]) == [.i64(2)])
+}
+
+@Test func functionTypeRejectsUnsupportedReferenceKinds() throws {
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (func (export "takes_ref") (param funcref)))
+        """
+    )
+    let function = try Instance(store: store, module: module).exportedFunction(named: "takes_ref")
+
+    do {
+        _ = try function.type()
+        Issue.record("expected unsupported value kind")
+    } catch let error as WasmtimeError {
+        #expect(error == .unsupportedValueKind(Int(wasm_valkind_t(WASM_FUNCREF.rawValue))))
+    }
+}
+
 @Test func exportedFunctionReportsMissingAndWrongKindExports() throws {
     let engine = try Engine()
     let store = try Store(engine: engine)
@@ -1411,6 +1472,7 @@ import Testing
     #expect(ValueKind.f64.description == "f64")
     #expect(Value.i64(5).kind == .i64)
     #expect(try add.call([.i32(20), .i32(22)]) == [.i32(42)])
+    #expect(try add.type() == FunctionType(parameters: [.i32, .i32], results: [.i32]))
 
     let module = try Module(
         engine: engine,
@@ -1425,9 +1487,16 @@ import Testing
     )
     let linker = try Linker(engine: engine)
     try linker.define(module: "host", name: "add", function: add)
+    switch try #require(linker.get(store: store, module: "host", name: "add")) {
+    case .function(let linkedAdd):
+        #expect(try linkedAdd.type() == FunctionType(parameters: [.i32, .i32], results: [.i32]))
+    default:
+        Issue.record("expected linked function extern")
+    }
     let instance = try linker.instantiate(store: store, module: module)
 
     #expect(try instance.exportedFunction(named: "run").call() == [.i32(15)])
+    #expect(try instance.exportedFunction(named: "run").type() == FunctionType(results: [.i32]))
 }
 
 @Test func linkerDefinesStoreIndependentHostFunctions() throws {
@@ -1468,6 +1537,10 @@ import Testing
     let instance = try linker.instantiate(store: store, module: module)
 
     #expect(try instance.exportedFunction(named: "run").call() == [.i32(42), .i64(42), .f32(5.5), .f64(7.5)])
+    #expect(
+        try instance.exportedFunction(named: "run").type() ==
+            FunctionType(results: [.i32, .i64, .f32, .f64])
+    )
 }
 
 @Test func hostFunctionsTrapWhenThrowingOrReturningInvalidResults() throws {

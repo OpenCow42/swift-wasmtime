@@ -25,6 +25,7 @@ visible before public release.
 - Direct and linker-based instantiation.
 - Exported core function lookup and checked scalar calls for `i32`, `i64`,
   `f32`, and `f64`.
+- Function signature introspection through `Func.type()` and `FunctionType`.
 - Host functions through `Func`, `Linker.defineFunction`, and
   `RuntimeHostFunction`.
 - General extern lookup through `Extern`, `Instance.export(named:)`,
@@ -133,12 +134,13 @@ Related C API families:
 
 ### Function Type Introspection
 
-The package can build function types, but does not expose public introspection
-over imported/exported function signatures.
+The package can build function types and inspect `Func` signatures through
+`Func.type()` and `FunctionType`.
 
-- Public function type wrapper.
-- Parameter/result inspection.
-- Export/import type inspection integration.
+Remaining function type gaps:
+
+- Module import/export type inspection integration.
+- Reference-typed function signatures, pending broader reference value modeling.
 
 ### Unchecked Calls
 

@@ -1632,6 +1632,19 @@ public final class Func {
         self.raw = raw
     }
 
+    /// Returns the scalar parameter and result kinds accepted by this function.
+    ///
+    /// Reference-typed signatures throw `WasmtimeError.unsupportedValueKind`
+    /// until the package grows broader reference value modeling.
+    public func type() throws -> FunctionType {
+        var function = raw
+        guard let type = wasmtime_func_type(store.context, &function) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasmtime_func_type returned nil") // coverage:ignore defensive C invariant
+        }
+        defer { wasm_functype_delete(type) }
+        return try FunctionType(raw: type)
+    }
+
     public func call(_ arguments: [Value] = []) throws -> [Value] {
         let resultCount = self.resultCount()
         let rawArguments = arguments.map(\.rawValue)
@@ -2296,7 +2309,7 @@ public enum ValueKind: Sendable, Equatable, CustomStringConvertible {
     }
 }
 
-/// Scalar function signature for host functions.
+/// Scalar function signature for WebAssembly and host functions.
 public struct FunctionType: Sendable, Equatable {
     public var parameters: [ValueKind]
     public var results: [ValueKind]
@@ -2304,6 +2317,17 @@ public struct FunctionType: Sendable, Equatable {
     public init(parameters: [ValueKind] = [], results: [ValueKind] = []) {
         self.parameters = parameters
         self.results = results
+    }
+
+    init(raw: OpaquePointer) throws {
+        guard let params = wasm_functype_params(raw) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasm_functype_params returned nil") // coverage:ignore defensive C invariant
+        }
+        guard let results = wasm_functype_results(raw) else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasm_functype_results returned nil") // coverage:ignore defensive C invariant
+        }
+        self.parameters = try Self.valueKinds(in: params)
+        self.results = try Self.valueKinds(in: results)
     }
 
     func makeRaw() throws -> OpaquePointer {
@@ -2334,6 +2358,22 @@ public struct FunctionType: Sendable, Equatable {
             wasm_valtype_vec_new(&vector, buffer.count, buffer.baseAddress)
         }
         return vector
+    }
+
+    private static func valueKinds(in vector: UnsafePointer<wasm_valtype_vec_t>) throws -> [ValueKind] {
+        let count = Int(vector.pointee.size)
+        guard count > 0 else {
+            return []
+        }
+        guard let data = vector.pointee.data else { // coverage:ignore defensive C invariant
+            throw WasmtimeError.allocationFailed("wasm_valtype_vec_t data was nil") // coverage:ignore defensive C invariant
+        }
+        return try (0..<count).map { index in
+            guard let valueType = data[index] else { // coverage:ignore defensive C invariant
+                throw WasmtimeError.allocationFailed("wasm_valtype_vec_t element was nil") // coverage:ignore defensive C invariant
+            }
+            return try ValueKind(rawValue: wasm_valtype_kind(valueType))
+        }
     }
 }
 
