@@ -24,6 +24,7 @@ The project values:
 - SwiftPM-friendly release tags that mirror vendored Wasmtime semver without a
   leading `v`
 
-The first milestone is not a complete Wasmtime binding. It is a small, reliable
-core that can compile, instantiate, call, trap, configure WASI, and teach future
-contributors where the sharp edges are.
+The project is not trying to become a complete Wasmtime binding all at once. It
+aims to keep growing from a small, reliable core that can compile, instantiate,
+call, trap, configure WASI, and teach future contributors where the sharp edges
+are.

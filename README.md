@@ -292,7 +292,8 @@ Wasmtime project under the same license. See `LICENSE` and
 
 ## Build And Test
 
-On this machine the Xcode toolchain is the known-good path:
+For local development with Xcode on macOS, keep Swift and Clang module caches
+inside the workspace:
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \

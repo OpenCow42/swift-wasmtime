@@ -391,6 +391,5 @@ Potential areas:
 - Add focused examples as new API families land.
 - Add a compatibility table for Wasmtime C API families once this roadmap starts
   being implemented.
-- Document any trusted-input requirements for deserialize APIs.
 - Document any unsafe/raw-pointer escape hatches separately from the main safe
   Swift API.
