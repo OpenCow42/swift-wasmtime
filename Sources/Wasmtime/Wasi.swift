@@ -22,6 +22,14 @@ public final class WasiConfig {
         self.raw = raw
     }
 
+    public func inheritNetwork() {
+        wasi_config_inherit_network(requiredRaw)
+    }
+
+    public func setIPNameLookupAllowed(_ isAllowed: Bool = true) {
+        wasi_config_allow_ip_name_lookup(requiredRaw, isAllowed)
+    }
+
     public func setArguments(_ arguments: [String]) throws {
         try withCStringArray(arguments) { pointers in
             guard wasi_config_set_argv(requiredRaw, pointers.count, pointers.baseAddress) else { // coverage:ignore Swift String UTF-8 is valid
@@ -175,6 +183,8 @@ public struct WasiOptions: Sendable {
     public var standardErrorFile: String?
     public var inheritStandardError: Bool
     public var preopenedDirectories: [WasiPreopenedDirectory]
+    public var inheritNetwork: Bool
+    public var allowsIPNameLookup: Bool
 
     public init(
         arguments: [String]? = nil,
@@ -190,7 +200,9 @@ public struct WasiOptions: Sendable {
         standardErrorHandler: WasiOutputHandler? = nil,
         standardErrorFile: String? = nil,
         inheritStandardError: Bool = false,
-        preopenedDirectories: [WasiPreopenedDirectory] = []
+        preopenedDirectories: [WasiPreopenedDirectory] = [],
+        inheritNetwork: Bool = false,
+        allowsIPNameLookup: Bool = false
     ) {
         self.arguments = arguments
         self.inheritArguments = inheritArguments
@@ -206,10 +218,18 @@ public struct WasiOptions: Sendable {
         self.standardErrorFile = standardErrorFile
         self.inheritStandardError = inheritStandardError
         self.preopenedDirectories = preopenedDirectories
+        self.inheritNetwork = inheritNetwork
+        self.allowsIPNameLookup = allowsIPNameLookup
     }
 
     func makeConfig() throws -> WasiConfig {
         let config = try WasiConfig()
+        if inheritNetwork {
+            config.inheritNetwork()
+        }
+        if allowsIPNameLookup {
+            config.setIPNameLookupAllowed()
+        }
         if let arguments {
             try config.setArguments(arguments)
         }

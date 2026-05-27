@@ -48,6 +48,15 @@
  * shared library instead. You must distribute the appropriate shared library
  * for your platform if you do this.
  *
+ * The `WASMTIME_ALWAYS_INSTALL` variable is provided as when used as a
+ * subproject, the default behaviour is to not install any of the headers or
+ * static libraries. So as to provide them as installation artifacts for users
+ * who still wish to have them, this will re-enable their install, even if used
+ * as a subproject.
+ *
+ * If `BUILD_SHARED_LIBS` is set, even as a subproject the shared objects will
+ * be added to the installation artifacts as not to cause any breakages.
+ *
  * ## Linking against the C API
  *
  * You'll want to arrange the `include` directory of the C API to be in your
@@ -187,11 +196,17 @@
 #include <wasmtime/conf.h>
 // clang-format off
 // IWYU pragma: begin_exports
+#include <wasmtime/anyref.h>
+#include <wasmtime/arrayref.h>
+#include <wasmtime/async.h>
+#include <wasmtime/component.h>
 #include <wasmtime/config.h>
 #include <wasmtime/engine.h>
+#include <wasmtime/eqref.h>
 #include <wasmtime/error.h>
-#include <wasmtime/exn.h>
+#include <wasmtime/exnref.h>
 #include <wasmtime/extern.h>
+#include <wasmtime/externref.h>
 #include <wasmtime/func.h>
 #include <wasmtime/global.h>
 #include <wasmtime/instance.h>
@@ -201,13 +216,12 @@
 #include <wasmtime/profiling.h>
 #include <wasmtime/sharedmemory.h>
 #include <wasmtime/store.h>
+#include <wasmtime/structref.h>
 #include <wasmtime/table.h>
 #include <wasmtime/tag.h>
 #include <wasmtime/trap.h>
+#include <wasmtime/types.h>
 #include <wasmtime/val.h>
-#include <wasmtime/gc.h>
-#include <wasmtime/async.h>
-#include <wasmtime/component.h>
 #include <wasmtime/wat.h>
 // IWYU pragma: end_exports
 // clang-format on
@@ -215,11 +229,11 @@
 /**
  * \brief Wasmtime version string.
  */
-#define WASMTIME_VERSION "44.0.1"
+#define WASMTIME_VERSION "45.0.0"
 /**
  * \brief Wasmtime major version number.
  */
-#define WASMTIME_VERSION_MAJOR 44
+#define WASMTIME_VERSION_MAJOR 45
 /**
  * \brief Wasmtime minor version number.
  */
@@ -227,6 +241,6 @@
 /**
  * \brief Wasmtime patch version number.
  */
-#define WASMTIME_VERSION_PATCH 1
+#define WASMTIME_VERSION_PATCH 0
 
 #endif // WASMTIME_API_H

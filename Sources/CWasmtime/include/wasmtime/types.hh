@@ -1,6 +1,7 @@
 #ifndef WASMTIME_TYPES_HH
 #define WASMTIME_TYPES_HH
 
+#include <wasmtime/types/exnref.hh>
 #include <wasmtime/types/export.hh>
 #include <wasmtime/types/extern.hh>
 #include <wasmtime/types/func.hh>

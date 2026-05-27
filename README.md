@@ -22,7 +22,9 @@ story for vendored Rust-built C ABI libraries. This package therefore vendors
 the official Wasmtime C API artifacts and uses linker search paths selected by
 platform and architecture. Ease of use from SwiftPM is important to this project,
 even though the packaging tradeoff is not as clean as a native SwiftPM C/C++
-source target.
+source target. Upstream Rust toolchain requirements apply when building
+Wasmtime itself from source; normal Swift package consumers use the prebuilt C
+API artifacts vendored here.
 
 ## Current Scope
 
@@ -35,11 +37,12 @@ source target.
   configuration, `WasiOptions` for sendable WASI configuration, and
   `WasmtimeRuntime` for actor-serialized store execution.
 - Config knobs for component model, core Wasm proposals, SIMD/relaxed SIMD,
-  compilation strategy, Cranelift optimization/flags/debug verification/NaN
-  canonicalization, profiling strategy, target triples, trap handling, debug
-  info, native unwind info, macOS Mach-port handling, parallel compilation,
-  linear-memory reservation/guard sizing and copy-on-write initialization, fuel
-  consumption, epoch interruption, and maximum Wasm stack size.
+  compilation strategy including Winch selection, Cranelift optimization,
+  regalloc algorithm, flags/debug verification/NaN canonicalization, profiling
+  strategy, target triples, trap handling, debug info, native unwind info,
+  macOS Mach-port handling, parallel compilation, linear-memory
+  reservation/guard sizing and copy-on-write initialization, fuel consumption,
+  epoch interruption, and maximum Wasm stack size.
 - Resource-control APIs for fuel, epoch deadlines, epoch interruption callbacks,
   store resource limits, explicit store GC, and engine epoch increments, exposed
   both through low-level `Store`/`Engine` wrappers and `WasmtimeRuntime`.
@@ -57,7 +60,7 @@ source target.
   trap/error conversion with typed `TrapCode`, host-side trap/error helpers,
   `WasmFrame`/`WasmTrace` diagnostics, and WASI configuration including
   arguments, environment, stdio files, stdin bytes, stdout/stderr callbacks,
-  and preopened directories.
+  preopened directories, network inheritance, and IP name lookup.
 - Linear memory support through `MemoryType`, `Memory`, exported memory lookup,
   safe copy-based memory reads/writes, memory growth, and actor-isolated
   `WasmtimeRuntime` memory helpers.
@@ -82,7 +85,7 @@ source target.
   pre-instantiating modules with `InstancePre` for reuse across compatible
   stores. The remaining low-level extern definition surface for tags is not
   exposed yet.
-- Vendored Wasmtime version: `v44.0.1`.
+- Vendored Wasmtime version: `v45.0.0`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
 
 ## Runtime Safety
@@ -160,7 +163,7 @@ let wasmtimeArch = "x86_64"
 #error("swift-wasmtime currently supports arm64 and x86_64")
 #endif
 
-let wasmtimeVersion = "v44.0.1"
+let wasmtimeVersion = "v45.0.0"
 let wasmtimeLibraryPath = ".build/checkouts/swift-wasmtime/Vendor/Wasmtime/\(wasmtimeVersion)/\(wasmtimeArch)-\(wasmtimeOS)/lib"
 
 let package = Package(
@@ -168,7 +171,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/OpenCow42/swift-wasmtime.git",
-            .upToNextMajor(from: "44.0.1")
+            .upToNextMajor(from: "45.0.0")
         ),
     ],
     targets: [
@@ -283,8 +286,8 @@ try await componentRuntime.call("run", in: componentInstance)
 ## Version Tags
 
 Git release tags use SwiftPM-friendly semantic versions without a leading `v`.
-For example, this package tag is `44.0.1`, matching the vendored Wasmtime
-`v44.0.1` release. Upstream Wasmtime still uses `v`-prefixed tags, so scripts
+For example, this package tag is `45.0.0`, matching the vendored Wasmtime
+`v45.0.0` release. Upstream Wasmtime still uses `v`-prefixed tags, so scripts
 and vendored paths keep the upstream spelling where they interact with
 Bytecode Alliance release assets.
 
@@ -325,7 +328,7 @@ or intentionally triggering a process abort.
 To refresh the vendored C API artifacts:
 
 ```sh
-scripts/vendor-wasmtime.sh v44.0.1
+scripts/vendor-wasmtime.sh v45.0.0
 ```
 
 The script downloads release metadata from GitHub, reads the official asset

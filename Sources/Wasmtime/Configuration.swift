@@ -136,6 +136,12 @@ public final class Config {
         }
     }
 
+    public var craneliftRegallocAlgorithm: CraneliftRegallocAlgorithm = .backtracking {
+        didSet {
+            wasmtime_config_cranelift_regalloc_algorithm_set(requiredRaw, craneliftRegallocAlgorithm.rawValue)
+        }
+    }
+
     public var isCraneliftDebugVerifierEnabled: Bool = false {
         didSet {
             wasmtime_config_cranelift_debug_verifier_set(requiredRaw, isCraneliftDebugVerifierEnabled)
@@ -283,6 +289,7 @@ public final class Config {
         areCustomPageSizesEnabled = options.areCustomPageSizesEnabled
         strategy = options.strategy
         craneliftOptimizationLevel = options.craneliftOptimizationLevel
+        craneliftRegallocAlgorithm = options.craneliftRegallocAlgorithm
         isCraneliftDebugVerifierEnabled = options.isCraneliftDebugVerifierEnabled
         isCraneliftNaNCanonicalizationEnabled = options.isCraneliftNaNCanonicalizationEnabled
         profiler = options.profiler
@@ -364,6 +371,7 @@ public struct EngineOptions: Sendable, Equatable {
     public var areCustomPageSizesEnabled: Bool
     public var strategy: CompilationStrategy
     public var craneliftOptimizationLevel: CraneliftOptimizationLevel
+    public var craneliftRegallocAlgorithm: CraneliftRegallocAlgorithm
     public var isCraneliftDebugVerifierEnabled: Bool
     public var isCraneliftNaNCanonicalizationEnabled: Bool
     public var profiler: ProfilingStrategy
@@ -402,6 +410,7 @@ public struct EngineOptions: Sendable, Equatable {
         areCustomPageSizesEnabled: Bool = false,
         strategy: CompilationStrategy = .automatic,
         craneliftOptimizationLevel: CraneliftOptimizationLevel = .speed,
+        craneliftRegallocAlgorithm: CraneliftRegallocAlgorithm = .backtracking,
         isCraneliftDebugVerifierEnabled: Bool = false,
         isCraneliftNaNCanonicalizationEnabled: Bool = false,
         profiler: ProfilingStrategy = .none,
@@ -439,6 +448,7 @@ public struct EngineOptions: Sendable, Equatable {
         self.areCustomPageSizesEnabled = areCustomPageSizesEnabled
         self.strategy = strategy
         self.craneliftOptimizationLevel = craneliftOptimizationLevel
+        self.craneliftRegallocAlgorithm = craneliftRegallocAlgorithm
         self.isCraneliftDebugVerifierEnabled = isCraneliftDebugVerifierEnabled
         self.isCraneliftNaNCanonicalizationEnabled = isCraneliftNaNCanonicalizationEnabled
         self.profiler = profiler
@@ -483,11 +493,13 @@ public struct EngineOptions: Sendable, Equatable {
 public enum CompilationStrategy: Sendable, Equatable {
     case automatic
     case cranelift
+    case winch
 
     var rawValue: wasmtime_strategy_t {
         switch self {
         case .automatic: wasmtime_strategy_t(WASMTIME_STRATEGY_AUTO.rawValue)
         case .cranelift: wasmtime_strategy_t(WASMTIME_STRATEGY_CRANELIFT.rawValue)
+        case .winch: wasmtime_strategy_t(WASMTIME_STRATEGY_WINCH.rawValue)
         }
     }
 }
@@ -503,6 +515,19 @@ public enum CraneliftOptimizationLevel: Sendable, Equatable {
         case .none: wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_NONE.rawValue)
         case .speed: wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED.rawValue)
         case .speedAndSize: wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED_AND_SIZE.rawValue)
+        }
+    }
+}
+
+/// Register allocator used by the Cranelift compiler backend.
+public enum CraneliftRegallocAlgorithm: Sendable, Equatable {
+    case backtracking
+    case singlePass
+
+    var rawValue: wasmtime_regalloc_algorithm_t {
+        switch self {
+        case .backtracking: wasmtime_regalloc_algorithm_t(WASMTIME_REGALLOC_BACKTRACKING.rawValue)
+        case .singlePass: wasmtime_regalloc_algorithm_t(WASMTIME_REGALLOC_SINGLE_PASS.rawValue)
         }
     }
 }

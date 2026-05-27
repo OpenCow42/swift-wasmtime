@@ -20,7 +20,7 @@ let wasmtimeArch = "x86_64"
 #error("Wasmtime currently supports arm64 and x86_64")
 #endif
 
-let wasmtimeVersion = "v44.0.1"
+let wasmtimeVersion = "v45.0.0"
 let wasmtimeLibraryPath = "Vendor/Wasmtime/\(wasmtimeVersion)/\(wasmtimeArch)-\(wasmtimeOS)/lib"
 
 let package = Package(
