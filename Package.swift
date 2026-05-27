@@ -44,7 +44,8 @@ let package = Package(
             ],
             linkerSettings: [
                 .unsafeFlags(["-L", wasmtimeLibraryPath]),
-                .linkedLibrary("wasmtime"),
+                .linkedLibrary("wasmtime", .when(platforms: [.macOS, .linux])),
+                .linkedLibrary("wasmtime.dll", .when(platforms: [.windows])),
                 .linkedLibrary("pthread", .when(platforms: [.linux])),
                 .linkedLibrary("dl", .when(platforms: [.linux])),
                 .linkedLibrary("m", .when(platforms: [.linux])),
