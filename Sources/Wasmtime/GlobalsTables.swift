@@ -18,9 +18,7 @@ public final class GlobalType: @unchecked Sendable {
     public let isMutable: Bool
 
     public init(content: ValueKind, isMutable: Bool = false) throws {
-        guard let valueType = wasm_valtype_new(content.wasmRawValue) else { // coverage:ignore defensive C allocation failure
-            throw WasmtimeError.allocationFailed("wasm_valtype_new returned nil")
-        }
+        let valueType = try content.makeRawValueType()
         let mutability = wasm_mutability_t(isMutable ? WASM_VAR.rawValue : WASM_CONST.rawValue)
         guard let raw = wasm_globaltype_new(valueType, mutability) else { // coverage:ignore defensive C allocation failure
             wasm_valtype_delete(valueType) // coverage:ignore defensive C allocation failure
@@ -37,7 +35,7 @@ public final class GlobalType: @unchecked Sendable {
             throw WasmtimeError.allocationFailed("wasm_globaltype_content returned nil") // coverage:ignore defensive C invariant
         }
         do {
-            self.content = try ValueKind(rawValue: wasm_valtype_kind(valueType))
+            self.content = try ValueKind(rawType: valueType)
         } catch {
             wasm_globaltype_delete(raw)
             throw error

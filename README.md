@@ -55,18 +55,19 @@ API artifacts vendored here.
   module cloning, compiled module serialization/deserialization artifacts, plus
   import/export type metadata inspection for functions, globals, tables, and
   memories.
-- Direct instantiation, linker instantiation, exported function lookup, scalar
-  calls for `i32`, `i64`, `f32`, and `f64`, function signature introspection,
-  trap/error conversion with typed `TrapCode`, host-side trap/error helpers,
-  `WasmFrame`/`WasmTrace` diagnostics, and WASI configuration including
-  arguments, environment, stdio files, stdin bytes, stdout/stderr callbacks,
-  preopened directories, network inheritance, and IP name lookup.
+- Direct instantiation, linker instantiation, exported function lookup, checked
+  calls for `i32`, `i64`, `f32`, `f64`, and SIMD-backed `v128`, function
+  signature introspection, trap/error conversion with typed `TrapCode`,
+  host-side trap/error helpers, `WasmFrame`/`WasmTrace` diagnostics, and WASI
+  configuration including arguments, environment, stdio files, stdin bytes,
+  stdout/stderr callbacks, preopened directories, network inheritance, and IP
+  name lookup.
 - Linear memory support through `MemoryType`, `Memory`, exported memory lookup,
   safe copy-based memory reads/writes, memory growth, and actor-isolated
   `WasmtimeRuntime` memory helpers.
-- Numeric scalar global support through `GlobalType`, `Global`, exported global
-  lookup, immutable and mutable global reads/writes, linker-defined globals, and
-  actor-isolated `WasmtimeRuntime` global helpers.
+- Numeric scalar and `v128` global support through `GlobalType`, `Global`,
+  exported global lookup, immutable and mutable global reads/writes,
+  linker-defined globals, and actor-isolated `WasmtimeRuntime` global helpers.
 - Table support through `TableType`, `Table`, exported table lookup, table size,
   table growth, linker-defined tables, function references, and null
   `funcref`/`externref` elements, including actor-isolated `WasmtimeRuntime`

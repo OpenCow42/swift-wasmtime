@@ -164,6 +164,35 @@ import Testing
     }
 }
 
+@Test func v128GlobalsCanBeCreatedReadAndSetFromSwift() throws {
+    let config = try Config()
+    config.isSIMDEnabled = true
+    let engine = try Engine(config: config)
+    let store = try Store(engine: engine)
+    let first = V128(i32x4: SIMD4<Int32>(1, 2, 3, 4))
+    let second = V128(f32x4: SIMD4<Float>(1.25, 2.5, 3.75, 4.5))
+    let global = try Global(store: store, type: GlobalType(content: .v128, isMutable: true), value: .v128(first))
+
+    let globalType = try global.type()
+    #expect(globalType.content == .v128)
+    #expect(globalType.isMutable)
+    #expect(try global.get() == .v128(first))
+
+    try global.set(.v128(second))
+    #expect(try global.get() == .v128(second))
+
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (global (export "vector") v128 (v128.const i32x4 5 6 7 8)))
+        """
+    )
+    let instance = try Instance(store: store, module: module)
+    #expect(try instance.exportedGlobal(named: "vector").type().content == .v128)
+    #expect(try instance.exportedGlobal(named: "vector").get() == .v128(V128(i32x4: SIMD4<Int32>(5, 6, 7, 8))))
+}
+
 @Test func globalsReportMissingAndWrongKindExports() throws {
     let engine = try Engine()
     let store = try Store(engine: engine)

@@ -30,8 +30,8 @@ visible before public release.
   lookup for named modules.
 - Linker pre-instantiation with reusable `InstancePre` handles and module clone
   inspection.
-- Exported core function lookup and checked scalar calls for `i32`, `i64`,
-  `f32`, and `f64`.
+- Exported core function lookup and checked calls for `i32`, `i64`, `f32`,
+  `f64`, and SIMD-backed `v128`.
 - Function signature introspection through `Func.type()` and `FunctionType`.
 - Host functions through `Func`, `Linker.defineFunction`, and
   `RuntimeHostFunction`.
@@ -76,7 +76,7 @@ yet.
 
 ### Globals
 
-Numeric scalar globals are covered by `GlobalType`, `Global`,
+Numeric scalar and `v128` globals are covered by `GlobalType`, `Global`,
 `Instance.exportedGlobal(named:)`, `Extern.global`, and
 `Linker.define(module:name:global:)`.
 
@@ -122,7 +122,7 @@ Missing tag and exception support:
 
 ### Broader Value Types
 
-Swift Wasmtime currently supports scalar numeric values only.
+Swift Wasmtime currently supports scalar numeric values and `v128`.
 
 Missing value kinds and value wrappers include:
 
@@ -134,7 +134,6 @@ Missing value kinds and value wrappers include:
 - `structref`
 - `arrayref`
 - `exnref`
-- `v128`, if a stable Swift representation is chosen.
 
 Related C API families:
 
