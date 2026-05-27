@@ -24,6 +24,70 @@ import Testing
     #expect(try instance.exportedFunction(named: "nothing").call() == [])
 }
 
+@Test func v128ValuesExposeSIMDStorageAndLaneViews() throws {
+    let byteVector = V128(bytes: SIMD16<UInt8>(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15))
+    #expect(byteVector.bytes == SIMD16<UInt8>(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15))
+    #expect(byteVector.littleEndianBytes == Array(UInt8(0)...UInt8(15)))
+    #expect(byteVector.description == "v128([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])")
+    #expect(try V128(littleEndianBytes: Array(UInt8(0)...UInt8(15))) == byteVector)
+    try expectWasmtimeError {
+        _ = try V128(littleEndianBytes: [1, 2, 3])
+    }
+
+    let i8 = SIMD16<Int8>(-8, -7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7)
+    let i16 = SIMD8<Int16>(-4, -3, -2, -1, 1, 2, 3, 4)
+    let i32 = SIMD4<Int32>(1, 2, 3, 4)
+    let i64 = SIMD2<Int64>(5, 6)
+    let f32 = SIMD4<Float>(1.25, 2.5, 3.75, 4.5)
+    let f64 = SIMD2<Double>(5.25, 6.5)
+
+    #expect(V128(i8x16: i8).i8x16 == i8)
+    #expect(V128(i16x8: i16).i16x8 == i16)
+    #expect(V128(i32x4: i32).i32x4 == i32)
+    #expect(V128(i64x2: i64).i64x2 == i64)
+    #expect(V128(f32x4: f32).f32x4 == f32)
+    #expect(V128(f64x2: f64).f64x2 == f64)
+    #expect(Value.v128(byteVector).kind == .v128)
+    #expect(ValueKind.v128.description == "v128")
+    #expect(Value.v128(byteVector).description == byteVector.description)
+}
+
+@Test func callsV128FunctionsAndHostFunctions() throws {
+    let config = try Config()
+    config.isSIMDEnabled = true
+    let engine = try Engine(config: config)
+    let store = try Store(engine: engine)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "echo" (func $echo (param v128) (result v128)))
+          (func (export "identity") (param v128) (result v128)
+            local.get 0)
+          (func (export "constant") (result v128)
+            v128.const i32x4 1 2 3 4)
+          (func (export "host_echo") (param v128) (result v128)
+            local.get 0
+            call $echo))
+        """
+    )
+    let input = V128(bytes: SIMD16<UInt8>(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
+    let linker = try Linker(engine: engine)
+    try linker.defineFunction(module: "host", name: "echo", parameters: [.v128], results: [.v128]) { _, arguments in
+        #expect(arguments == [.v128(input)])
+        return arguments
+    }
+    let instance = try linker.instantiate(store: store, module: module)
+
+    let identity = try instance.exportedFunction(named: "identity")
+    #expect(try identity.type() == FunctionType(parameters: [.v128], results: [.v128]))
+    #expect(try identity.call([.v128(input)]) == [.v128(input)])
+
+    let expectedConstant = V128(i32x4: SIMD4<Int32>(1, 2, 3, 4))
+    #expect(try instance.exportedFunction(named: "constant").call() == [.v128(expectedConstant)])
+    #expect(try instance.exportedFunction(named: "host_echo").call([.v128(input)]) == [.v128(input)])
+}
+
 @Test func functionsExposeScalarTypes() throws {
     let engine = try Engine()
     let store = try Store(engine: engine)

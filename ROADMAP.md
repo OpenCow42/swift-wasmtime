@@ -1,7 +1,7 @@
 # Swift Wasmtime Roadmap
 
 This roadmap tracks missing Swift API coverage compared with the vendored
-Wasmtime C API in `Sources/CWasmtime/include` for Wasmtime `v44.0.1`.
+Wasmtime C API in `Sources/CWasmtime/include` for Wasmtime `v45.0.0`.
 
 Swift Wasmtime is not trying to mirror every C function one-for-one. The goal is
 to grow a small, memory-safe, Swift 6-friendly API while making intentional gaps
@@ -30,8 +30,8 @@ visible before public release.
   lookup for named modules.
 - Linker pre-instantiation with reusable `InstancePre` handles and module clone
   inspection.
-- Exported core function lookup and checked scalar calls for `i32`, `i64`,
-  `f32`, and `f64`.
+- Exported core function lookup and checked calls for `i32`, `i64`, `f32`,
+  `f64`, and SIMD-backed `v128`.
 - Function signature introspection through `Func.type()` and `FunctionType`.
 - Host functions through `Func`, `Linker.defineFunction`, and
   `RuntimeHostFunction`.
@@ -48,8 +48,8 @@ visible before public release.
   resource limits, explicit store GC, engine epoch increments, and maximum Wasm
   stack configuration.
 - WASI configuration from `wasi.h`: arguments, environment, inherited stdio,
-  stdin bytes/files, stdout/stderr files, stdout/stderr callbacks, and preopened
-  directories.
+  stdin bytes/files, stdout/stderr files, stdout/stderr callbacks, preopened
+  directories, inherited network access, and IP name lookup.
 - WASI HTTP store initialization and component linker registration.
 - Early component model support: compile component, instantiate component,
   register WASIp2/WASI HTTP, and call zero-parameter, zero-result exported
@@ -76,7 +76,7 @@ yet.
 
 ### Globals
 
-Numeric scalar globals are covered by `GlobalType`, `Global`,
+Numeric scalar and `v128` globals are covered by `GlobalType`, `Global`,
 `Instance.exportedGlobal(named:)`, `Extern.global`, and
 `Linker.define(module:name:global:)`.
 
@@ -104,11 +104,16 @@ Missing tag and exception support:
 - `wasmtime_tag_new`
 - `wasmtime_tag_type`
 - `wasmtime_tag_eq`
-- `wasmtime_exn_new`
-- `wasmtime_exn_delete`
-- `wasmtime_exn_tag`
-- `wasmtime_exn_field_count`
-- `wasmtime_exn_field`
+- `wasmtime_exn_type_new`
+- `wasmtime_exn_type_delete`
+- `wasmtime_exn_type_copy`
+- `wasmtime_exn_type_tag_type`
+- `wasmtime_exnref_new`
+- `wasmtime_exnref_clone`
+- `wasmtime_exnref_unroot`
+- `wasmtime_exnref_tag`
+- `wasmtime_exnref_field_count`
+- `wasmtime_exnref_field`
 - `wasmtime_context_has_exception`
 - `wasmtime_context_take_exception`
 - `wasmtime_context_set_exception`
@@ -117,7 +122,7 @@ Missing tag and exception support:
 
 ### Broader Value Types
 
-Swift Wasmtime currently supports scalar numeric values only.
+Swift Wasmtime currently supports scalar numeric values and `v128`.
 
 Missing value kinds and value wrappers include:
 
@@ -129,12 +134,13 @@ Missing value kinds and value wrappers include:
 - `structref`
 - `arrayref`
 - `exnref`
-- `v128`, if a stable Swift representation is chosen.
 
 Related C API families:
 
 - `wasmtime/val.h`
-- `wasmtime/gc.h`
+- split GC/reference headers such as `wasmtime/externref.h`,
+  `wasmtime/anyref.h`, `wasmtime/structref.h`, `wasmtime/arrayref.h`, and
+  `wasmtime/exnref.h`
 - Standard value/type helpers from `wasm.h`.
 
 ### Function Type Introspection
@@ -300,6 +306,7 @@ The current config surface is useful but incomplete. Missing config knobs:
 - `wasmtime_config_cache_config_load`
 - `wasmtime_config_wasm_threads_set`
 - `wasmtime_config_wasm_stack_switching_set`
+- Component-model async config knobs, pending a Swift async component API.
 
 The remaining entries are intentionally deferred because cache loading returns
 errors and needs path/default-cache semantics, while Wasm threads and stack
@@ -336,6 +343,8 @@ Missing async APIs:
 - `wasmtime_context_fuel_async_yield_interval`
 - `wasmtime_context_epoch_deadline_async_yield_and_update`
 - `wasmtime_config_host_stack_creator_set`
+- Component async config, instantiation, function call, and component linker
+  callback APIs added in Wasmtime v45.
 
 These should only be wrapped if the package commits to a real Swift async
 integration story.

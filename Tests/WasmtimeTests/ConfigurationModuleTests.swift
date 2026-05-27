@@ -12,15 +12,19 @@ import Testing
     acceptsSendable(ResourceLimits())
     acceptsSendable(EpochDeadlineAction.continue(ticksBeyondCurrent: 1))
     acceptsSendable(CompilationStrategy.automatic)
+    acceptsSendable(CompilationStrategy.winch)
     acceptsSendable(CraneliftOptimizationLevel.speed)
+    acceptsSendable(CraneliftRegallocAlgorithm.backtracking)
     acceptsSendable(ProfilingStrategy.none)
     acceptsSendable(try MemoryType(minimumPages: 0))
     acceptsSendable(try GlobalType(content: .i32))
     acceptsSendable(try TableType(minimumElements: 0))
     acceptsSendable(TableElementKind.functionReference)
     acceptsSendable(ValueKind.i32)
+    acceptsSendable(V128(bytes: SIMD16<UInt8>(repeating: 0)))
     acceptsSendable(FunctionType(parameters: [.i32], results: [.i64]))
     acceptsSendable(Value.i32(1))
+    acceptsSendable(Value.v128(V128(bytes: SIMD16<UInt8>(repeating: 0))))
     acceptsSendable(WasiDirectoryPermissions.read)
     acceptsSendable(WasiFilePermissions.read)
     acceptsSendable(RuntimeInstanceID(rawValue: 1))
@@ -234,10 +238,36 @@ import Testing
     #expect(exports.map(\.kind) == [.function, .global])
 }
 
+@Test func moduleTypeMetadataIncludesV128SignaturesAndGlobals() throws {
+    let config = try Config()
+    config.isSIMDEnabled = true
+    let engine = try Engine(config: config)
+    let module = try Module(
+        engine: engine,
+        wat: """
+        (module
+          (import "host" "takes_vector" (func (param v128) (result v128)))
+          (global (export "vector") v128 (v128.const i32x4 1 2 3 4))
+          (func (export "returns_vector") (result v128)
+            v128.const i32x4 5 6 7 8))
+        """
+    )
+
+    let imports = try module.imports()
+    #expect(imports.count == 1)
+    #expect(imports[0].type == .function(FunctionType(parameters: [.v128], results: [.v128])))
+
+    let exports = try module.exports()
+    #expect(exports.map(\.name) == ["vector", "returns_vector"])
+    #expect(exports[0].type == .global(ModuleGlobalType(content: .v128)))
+    #expect(exports[1].type == .function(FunctionType(results: [.v128])))
+}
+
 @Test func configExposesCompilerTargetMemoryAndTrapOptions() throws {
     let config = try Config()
     config.strategy = .cranelift
     config.craneliftOptimizationLevel = .speedAndSize
+    config.craneliftRegallocAlgorithm = .singlePass
     config.isSIMDEnabled = true
     config.isRelaxedSIMDEnabled = true
     config.isRelaxedSIMDDeterministic = true
@@ -276,11 +306,23 @@ import Testing
     flagConfig.enableCraneliftFlag(nativeSIMDFlag)
     flagConfig.setCraneliftFlag(nativeSIMDFlag, to: "true")
 
+    let winchConfig = try Config()
+    winchConfig.strategy = .winch
+
     #expect(CompilationStrategy.automatic.rawValue == wasmtime_strategy_t(WASMTIME_STRATEGY_AUTO.rawValue))
     #expect(CompilationStrategy.cranelift.rawValue == wasmtime_strategy_t(WASMTIME_STRATEGY_CRANELIFT.rawValue))
+    #expect(CompilationStrategy.winch.rawValue == wasmtime_strategy_t(WASMTIME_STRATEGY_WINCH.rawValue))
     #expect(CraneliftOptimizationLevel.none.rawValue == wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_NONE.rawValue))
     #expect(CraneliftOptimizationLevel.speed.rawValue == wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED.rawValue))
     #expect(CraneliftOptimizationLevel.speedAndSize.rawValue == wasmtime_opt_level_t(WASMTIME_OPT_LEVEL_SPEED_AND_SIZE.rawValue))
+    #expect(
+        CraneliftRegallocAlgorithm.backtracking.rawValue ==
+            wasmtime_regalloc_algorithm_t(WASMTIME_REGALLOC_BACKTRACKING.rawValue)
+    )
+    #expect(
+        CraneliftRegallocAlgorithm.singlePass.rawValue ==
+            wasmtime_regalloc_algorithm_t(WASMTIME_REGALLOC_SINGLE_PASS.rawValue)
+    )
     #expect(ProfilingStrategy.none.rawValue == wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_NONE.rawValue))
     #expect(ProfilingStrategy.jitdump.rawValue == wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_JITDUMP.rawValue))
     #expect(ProfilingStrategy.vtune.rawValue == wasmtime_profiling_strategy_t(WASMTIME_PROFILING_STRATEGY_VTUNE.rawValue))
@@ -310,6 +352,7 @@ import Testing
         areCustomPageSizesEnabled: true,
         strategy: .cranelift,
         craneliftOptimizationLevel: .speedAndSize,
+        craneliftRegallocAlgorithm: .singlePass,
         isCraneliftDebugVerifierEnabled: true,
         isCraneliftNaNCanonicalizationEnabled: true,
         profiler: .none,
@@ -349,6 +392,7 @@ import Testing
     #expect(options.isWideArithmeticEnabled)
     #expect(options.areExceptionsEnabled)
     #expect(options.areCustomPageSizesEnabled)
+    #expect(options.craneliftRegallocAlgorithm == .singlePass)
     #expect(options.isCraneliftDebugVerifierEnabled)
     #expect(options.isCraneliftNaNCanonicalizationEnabled)
     #expect(options.profiler == .none)

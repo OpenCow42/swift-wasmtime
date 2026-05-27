@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${1:-v44.0.1}"
+version="${1:-v45.0.0}"
 repo="bytecodealliance/wasmtime"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="${TMPDIR:-/tmp}/swift-wasmtime-vendor-${version}"

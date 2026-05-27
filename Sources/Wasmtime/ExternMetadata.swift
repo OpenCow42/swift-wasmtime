@@ -137,7 +137,7 @@ public struct ModuleGlobalType: Sendable, Equatable {
         guard let valueType = wasm_globaltype_content(raw) else { // coverage:ignore defensive C invariant
             throw WasmtimeError.allocationFailed("wasm_globaltype_content returned nil") // coverage:ignore defensive C invariant
         }
-        self.content = try ValueKind(rawValue: wasm_valtype_kind(valueType))
+        self.content = try ValueKind(rawType: valueType)
         self.isMutable = wasm_globaltype_mutability(raw) == wasm_mutability_t(WASM_VAR.rawValue)
     }
 }

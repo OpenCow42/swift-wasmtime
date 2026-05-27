@@ -59,6 +59,20 @@ import Testing
     bytesConfig.setStandardInputBytes(Array("bytes\n".utf8))
 }
 
+@Test func wasiNetworkAndNameLookupConfigurationCanBeApplied() throws {
+    let config = try WasiConfig()
+    config.inheritNetwork()
+    config.setIPNameLookupAllowed()
+    config.setIPNameLookupAllowed(false)
+
+    let options = WasiOptions(inheritNetwork: true, allowsIPNameLookup: true)
+    acceptsSendable(options)
+
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    try store.setWasi(try options.makeConfig())
+}
+
 @Test func wasiPreopenedDirectoryGrantsReadAccess() throws {
     let temporary = testTemporaryDirectory()
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
@@ -167,3 +181,59 @@ import Testing
     #expect(try instance.exportedFunction(named: "_start").call() == [])
     #expect(try String(contentsOf: stdout, encoding: .utf8) == "preopen-ok\n")
 }
+
+@Test func wasiPathOpenTruncateRequiresWriteFilePermissions() throws {
+    let readOnly = try runWasiTruncateAttempt(filePermissions: [.read])
+    #expect(readOnly == "preserve")
+
+    let writable = try runWasiTruncateAttempt(filePermissions: [.read, .write])
+    #expect(writable == "")
+}
+
+private func runWasiTruncateAttempt(filePermissions: WasiFilePermissions) throws -> String {
+    let temporary = testTemporaryDirectory()
+        .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
+    let sandbox = temporary.appendingPathComponent("sandbox", isDirectory: true)
+    let target = sandbox.appendingPathComponent("target.txt")
+    try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    try "preserve".write(to: target, atomically: true, encoding: .utf8)
+
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(engine: engine, wat: wasiTruncateWat)
+    let wasi = try WasiConfig()
+    try wasi.preopenDirectory(
+        hostPath: sandbox.path,
+        guestPath: "/sandbox",
+        directoryPermissions: [.read, .write],
+        filePermissions: filePermissions
+    )
+    try store.setWasi(wasi)
+    let linker = try Linker(engine: engine)
+    try linker.defineWasi()
+    let instance = try linker.instantiate(store: store, module: module)
+
+    #expect(try instance.exportedFunction(named: "_start").call() == [])
+    return try String(contentsOf: target, encoding: .utf8)
+}
+
+private let wasiTruncateWat = """
+(module
+  (import "wasi_snapshot_preview1" "path_open" (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+  (memory 1)
+  (export "memory" (memory 0))
+  (data (i32.const 64) "target.txt")
+  (func (export "_start") (local $errno i32)
+    i32.const 3
+    i32.const 0
+    i32.const 64
+    i32.const 10
+    i32.const 8
+    i64.const 66
+    i64.const 0
+    i32.const 0
+    i32.const 48
+    call $path_open
+    local.set $errno))
+"""
