@@ -16,6 +16,10 @@ public final class Config {
     private var raw: OpaquePointer?
 
     public init() throws {
+#if os(Windows)
+        ensureWasmtimeRuntimeLibraryIsDiscoverable()
+#endif
+
         guard let raw = wasm_config_new() else { // coverage:ignore defensive C allocation failure
             throw WasmtimeError.allocationFailed("wasm_config_new returned nil")
         }
@@ -558,6 +562,10 @@ public final class Engine: @unchecked Sendable {
     let raw: OpaquePointer
 
     public init() throws {
+#if os(Windows)
+        ensureWasmtimeRuntimeLibraryIsDiscoverable()
+#endif
+
         guard let raw = wasm_engine_new() else { // coverage:ignore defensive C allocation failure
             throw WasmtimeError.allocationFailed("wasm_engine_new returned nil")
         }
@@ -565,6 +573,10 @@ public final class Engine: @unchecked Sendable {
     }
 
     public init(config: Config) throws {
+#if os(Windows)
+        ensureWasmtimeRuntimeLibraryIsDiscoverable()
+#endif
+
         guard let raw = wasm_engine_new_with_config(config.release()) else { // coverage:ignore defensive C allocation failure
             throw WasmtimeError.allocationFailed("wasm_engine_new_with_config returned nil")
         }
