@@ -50,6 +50,8 @@ let package = Package(
                 .linkedLibrary("dl", .when(platforms: [.linux])),
                 .linkedLibrary("m", .when(platforms: [.linux])),
                 .linkedLibrary("ntdll", .when(platforms: [.windows])),
+                .linkedLibrary("delayimp", .when(platforms: [.windows])),
+                .unsafeFlags(["-Xlinker", "/DELAYLOAD:wasmtime.dll"], .when(platforms: [.windows])),
             ]
         ),
         .testTarget(
