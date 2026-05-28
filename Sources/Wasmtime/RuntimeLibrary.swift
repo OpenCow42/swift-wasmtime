@@ -53,13 +53,10 @@ private var wasmtimeVendorPlatform: String {
 }
 
 private func setWindowsEnvironmentVariable(_ name: String, _ value: String) {
-    name.withCString(encodedAs: UTF16.self) { wideName in
+    _ = name.withCString(encodedAs: UTF16.self) { wideName in
         value.withCString(encodedAs: UTF16.self) { wideValue in
             SetEnvironmentVariableW(wideName, wideValue)
         }
     }
 }
-#else
-@inline(__always)
-func ensureWasmtimeRuntimeLibraryIsDiscoverable() {}
 #endif
