@@ -27,6 +27,15 @@ require python3
 require shasum
 require tar
 
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  require cargo
+  require cmake
+  require ninja
+  require rustup
+  require xcodebuild
+  require xcrun
+fi
+
 mkdir -p "$work"
 curl -fsSL "https://api.github.com/repos/${repo}/releases/tags/${version}" -o "$release_json"
 mkdir -p "$root/Vendor/Wasmtime/${version}"
@@ -51,6 +60,96 @@ for asset in release["assets"]:
         raise SystemExit(0)
 raise SystemExit(f"missing release asset: {name}")
 PY
+}
+
+release_asset_field() {
+  local name="$1"
+  local field="$2"
+  python3 - "$release_json" "$name" "$field" <<'PY'
+import json
+import sys
+
+release_path, name, field = sys.argv[1:]
+with open(release_path, encoding="utf-8") as handle:
+    release = json.load(handle)
+for asset in release["assets"]:
+    if asset["name"] == name:
+        print(asset[field])
+        raise SystemExit(0)
+raise SystemExit(f"missing release asset: {name}")
+PY
+}
+
+download_verified_asset() {
+  local name="$1"
+  local path="$2"
+  local url expected actual
+
+  url="$(release_asset_field "$name" browser_download_url)"
+  expected="$(release_asset_field "$name" digest)"
+  expected="${expected#sha256:}"
+
+  curl -fL "$url" -o "$path"
+  actual="$(shasum -a 256 "$path" | awk '{print $1}')"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "checksum mismatch for ${name}" >&2
+    echo "expected: ${expected}" >&2
+    echo "actual:   ${actual}" >&2
+    exit 1
+  fi
+}
+
+patch_apple_mobile_source() {
+  local source_path="$1"
+
+  python3 - "$source_path" <<'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+replacements = {
+    "crates/wasmtime/Cargo.toml": [
+        (
+            "[target.'cfg(target_vendor = \"apple\")'.dependencies]\n"
+            "mach2 = { workspace = true, optional = true }\n",
+            "[target.'cfg(any(target_os = \"macos\", target_os = \"ios\"))'.dependencies]\n"
+            "mach2 = { workspace = true, optional = true }\n",
+        ),
+    ],
+    "crates/wasmtime/src/runtime/vm/sys/unix/mod.rs": [
+        (
+            "#[cfg(all(has_native_signals, target_vendor = \"apple\"))]\n"
+            "pub mod machports;\n",
+            "#[cfg(all(has_native_signals, any(target_os = \"macos\", target_os = \"ios\")))]\n"
+            "pub mod machports;\n",
+        ),
+    ],
+    "crates/wasmtime/src/runtime/vm/sys/unix/traphandlers.rs": [
+        (
+            "    } else if #[cfg(target_vendor = \"apple\")] {\n",
+            "    } else if #[cfg(any(target_os = \"macos\", target_os = \"ios\"))] {\n",
+        ),
+    ],
+    "crates/wasmtime/src/runtime/vm/sys/unix/signals.rs": [
+        (
+            "assert!(!macos_use_mach_ports || !cfg!(target_vendor = \"apple\"));",
+            "assert!(!macos_use_mach_ports || !cfg!(any(target_os = \"macos\", target_os = \"ios\")));",
+        ),
+    ],
+}
+
+for relative_path, edits in replacements.items():
+    path = root / relative_path
+    text = path.read_text(encoding="utf-8")
+    for old, new in edits:
+        if old not in text:
+            raise SystemExit(f"expected source text not found in {relative_path}")
+        text = text.replace(old, new)
+    path.write_text(text, encoding="utf-8")
+PY
+
+  cargo update --manifest-path "$source_path/Cargo.toml" \
+    -p iana-time-zone --precise 0.1.65
 }
 
 for target in "${targets[@]}"; do
@@ -124,5 +223,88 @@ module CWasmtime {
 EOF
   fi
 done
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  source_archive="wasmtime-${version}-src.tar.gz"
+  source_archive_path="${work}/${source_archive}"
+  source_path="${work}/source"
+  apple_install_root="${work}/apple-install"
+  apple_universal_root="${work}/apple-universal"
+  apple_xcframework="$root/Vendor/Wasmtime/${version}/Wasmtime.xcframework"
+
+  download_verified_asset "$source_archive" "$source_archive_path"
+  rm -rf "$source_path" "$apple_install_root" "$apple_universal_root" "$apple_xcframework"
+  mkdir -p "$source_path" "$apple_install_root" "$apple_universal_root"
+  tar -xzf "$source_archive_path" -C "$source_path" --strip-components 1
+
+  patch_apple_mobile_source "$source_path"
+
+  rustup target add \
+    aarch64-apple-ios \
+    aarch64-apple-ios-sim \
+    x86_64-apple-ios \
+    aarch64-apple-tvos \
+    aarch64-apple-tvos-sim
+
+  ios_deployment_target="${IPHONEOS_DEPLOYMENT_TARGET:-13.0}"
+  tvos_deployment_target="${TVOS_DEPLOYMENT_TARGET:-13.0}"
+  export CARGO_PROFILE_RELEASE_STRIP="${CARGO_PROFILE_RELEASE_STRIP:-debuginfo}"
+  export CARGO_PROFILE_RELEASE_PANIC="${CARGO_PROFILE_RELEASE_PANIC:-abort}"
+  export CARGO_PROFILE_RELEASE_LTO="${CARGO_PROFILE_RELEASE_LTO:-true}"
+  export RUSTFLAGS="${RUSTFLAGS:-} -C force-unwind-tables"
+
+  ios_targets=(
+    "aarch64-apple-ios"
+    "aarch64-apple-ios-sim"
+    "x86_64-apple-ios"
+  )
+  tvos_targets=(
+    "aarch64-apple-tvos"
+    "aarch64-apple-tvos-sim"
+  )
+
+  for target in "${ios_targets[@]}" "${tvos_targets[@]}"; do
+    build_path="${work}/apple-build/${target}"
+    install_path="${apple_install_root}/${target}"
+    (
+      if [[ "$target" == *"-tvos"* ]]; then
+        unset IPHONEOS_DEPLOYMENT_TARGET
+        export TVOS_DEPLOYMENT_TARGET="$tvos_deployment_target"
+      else
+        unset TVOS_DEPLOYMENT_TARGET
+        export IPHONEOS_DEPLOYMENT_TARGET="$ios_deployment_target"
+      fi
+
+      cmake \
+        -G Ninja \
+        "$source_path/crates/c-api" \
+        -B "$build_path" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DWASMTIME_TARGET="$target" \
+        -DCMAKE_INSTALL_PREFIX="$install_path" \
+        -DCMAKE_INSTALL_LIBDIR=lib
+      cmake --build "$build_path" --target install
+    )
+  done
+
+  mkdir -p "$apple_universal_root/ios-simulator/lib" "$root/Vendor/Wasmtime/${version}"
+  xcrun lipo -create \
+    "$apple_install_root/aarch64-apple-ios-sim/lib/libwasmtime.a" \
+    "$apple_install_root/x86_64-apple-ios/lib/libwasmtime.a" \
+    -output "$apple_universal_root/ios-simulator/lib/libwasmtime.a"
+
+  xcodebuild -create-xcframework \
+    -library "$apple_install_root/aarch64-apple-ios/lib/libwasmtime.a" \
+    -headers "$apple_install_root/aarch64-apple-ios/include" \
+    -library "$apple_universal_root/ios-simulator/lib/libwasmtime.a" \
+    -headers "$apple_install_root/aarch64-apple-ios-sim/include" \
+    -library "$apple_install_root/aarch64-apple-tvos/lib/libwasmtime.a" \
+    -headers "$apple_install_root/aarch64-apple-tvos/include" \
+    -library "$apple_install_root/aarch64-apple-tvos-sim/lib/libwasmtime.a" \
+    -headers "$apple_install_root/aarch64-apple-tvos-sim/include" \
+    -output "$apple_xcframework"
+else
+  echo "Skipping iOS/iPadOS/tvOS XCFramework vendoring; building those slices requires macOS and Xcode." >&2
+fi
 
 echo "Vendored Wasmtime ${version} C API artifacts."

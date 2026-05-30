@@ -3,7 +3,7 @@ import Foundation
 
 #if os(Linux)
 import Glibc
-#elseif os(macOS)
+#elseif canImport(Darwin)
 import Darwin
 #endif
 
@@ -24,6 +24,7 @@ public final class Config {
             throw WasmtimeError.allocationFailed("wasm_config_new returned nil")
         }
         self.raw = raw
+        try enforcePlatformRuntime()
     }
 
     public var isComponentModelEnabled: Bool = false {
@@ -258,6 +259,12 @@ public final class Config {
         let current = requiredRaw
         raw = nil
         return current
+    }
+
+    func enforcePlatformRuntime() throws {
+#if os(iOS) || os(tvOS)
+        try setTarget("pulley64")
+#endif
     }
 
     private var requiredRaw: OpaquePointer {
@@ -561,15 +568,20 @@ public enum ProfilingStrategy: Sendable, Equatable {
 public final class Engine: @unchecked Sendable {
     let raw: OpaquePointer
 
-    public init() throws {
+    public convenience init() throws {
 #if os(Windows)
         ensureWasmtimeRuntimeLibraryIsDiscoverable()
 #endif
 
+#if os(iOS) || os(tvOS)
+        let config = try Config()
+        try self.init(config: config)
+#else
         guard let raw = wasm_engine_new() else { // coverage:ignore defensive C allocation failure
             throw WasmtimeError.allocationFailed("wasm_engine_new returned nil")
         }
-        self.raw = raw
+        self.init(raw: raw)
+#endif
     }
 
     public init(config: Config) throws {
@@ -577,9 +589,14 @@ public final class Engine: @unchecked Sendable {
         ensureWasmtimeRuntimeLibraryIsDiscoverable()
 #endif
 
+        try config.enforcePlatformRuntime()
         guard let raw = wasm_engine_new_with_config(config.release()) else { // coverage:ignore defensive C allocation failure
             throw WasmtimeError.allocationFailed("wasm_engine_new_with_config returned nil")
         }
+        self.raw = raw
+    }
+
+    private init(raw: OpaquePointer) {
         self.raw = raw
     }
 
@@ -595,6 +612,11 @@ public final class Engine: @unchecked Sendable {
     /// code once their configured deadline has passed.
     public func incrementEpoch() {
         wasmtime_engine_increment_epoch(raw)
+    }
+
+    /// Returns whether this engine executes WebAssembly through Pulley.
+    public var isUsingPulley: Bool {
+        wasmtime_engine_is_pulley(raw)
     }
 
     deinit {

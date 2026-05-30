@@ -87,7 +87,37 @@ API artifacts vendored here.
   stores. The remaining low-level extern definition surface for tags is not
   exposed yet.
 - Vendored Wasmtime version: `v45.0.0`.
-- Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
+- Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`, plus
+  iOS/iPadOS and tvOS device and simulator slices through
+  `Wasmtime.xcframework`.
+
+## Apple Mobile Platform Status
+
+iOS, iPadOS, and tvOS support is experimental. SwiftPM consumers can depend on
+the package directly, and SwiftPM will select the vendored
+`Wasmtime.xcframework` slices for those platforms. The package does not build
+Wasmtime from Rust source inside consumer apps.
+
+On iOS, iPadOS, and tvOS, `Engine` creation is forced to Wasmtime's Pulley
+interpreter (`pulley64`) so guest WebAssembly runs without native JIT
+execution. This is the intended path for Apple's mobile platform restrictions,
+but it means behavior and performance should be validated against the real app
+workload rather than assumed from desktop Wasmtime.
+
+The current Apple mobile slices are:
+
+- iOS/iPadOS device: `arm64`
+- iOS/iPadOS simulator: `arm64` and `x86_64`
+- tvOS device: `arm64`
+- tvOS simulator: `arm64`
+
+iPadOS uses the iOS XCFramework slices. tvOS is more provisional than iOS and
+iPadOS: the full test suite passes on the tvOS simulator and the package
+cross-builds for tvOS device targets, but this project has not yet added a
+physical Apple TV, TestFlight, or App Store validation gate. Wasmtime also does
+not publish official iOS or tvOS C API artifacts for `v45.0.0`, so these slices
+are built from source by this repository's vendoring script. watchOS is not
+supported.
 
 ## Runtime Safety
 
@@ -130,16 +160,24 @@ handles or store-bound frame instance handles. This keeps diagnostic values
 `Sendable` and safe to retain after the original trap or error has been
 released.
 
+On iOS, iPadOS, and tvOS, `Engine` creation always targets Wasmtime's Pulley
+interpreter (`pulley64`) so guest code runs without native JIT execution.
+Cranelift remains present in the vendored C API so this package can still
+compile WAT/Wasm inputs into Pulley bytecode on device.
+
 ## Importing From SwiftPM
 
-Add the package dependency and point your target at the vendored Wasmtime library
-directory in SwiftPM's checkout. This mirrors the workaround used by downstream
-SwiftPM packages that need to stay inside SwiftPM without XCFrameworks or a
-system Wasmtime install.
+Add the package dependency to your target. On iOS, iPadOS, and tvOS, the
+package links the vendored `Wasmtime.xcframework` automatically.
+
+On macOS, Linux, and Windows, also point your target at the vendored Wasmtime
+library directory in SwiftPM's checkout. This mirrors the workaround used by
+downstream SwiftPM packages that need to stay inside SwiftPM without a system
+Wasmtime install.
 
 SwiftPM may still warn about this package's own relative `Vendor/...` search
 path when it is built as a dependency; the consumer target search path below is
-the path that makes the final link step succeed.
+the path that makes the final link step succeed for macOS, Linux, and Windows.
 
 ```swift
 // swift-tools-version: 6.3
@@ -153,7 +191,7 @@ let wasmtimeOS = "linux"
 #elseif os(Windows)
 let wasmtimeOS = "windows"
 #else
-#error("swift-wasmtime currently supports macOS, Linux, and Windows")
+#error("this manual linker search path is only needed on macOS, Linux, and Windows")
 #endif
 
 #if arch(arm64)
@@ -189,6 +227,9 @@ let package = Package(
     swiftLanguageModes: [.v6]
 )
 ```
+
+For iOS, iPadOS, and tvOS consumer targets, omit the `linkerSettings` block
+above.
 
 Then import and use the Swift module:
 
@@ -310,6 +351,30 @@ CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" \
 swift test --disable-sandbox
 ```
 
+iOS/iPadOS simulator test gate:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" \
+xcodebuild test \
+  -workspace .swiftpm/xcode/package.xcworkspace \
+  -scheme Wasmtime \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+  -derivedDataPath .build/xcode-derived
+```
+
+tvOS simulator test gate:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" \
+xcodebuild test \
+  -workspace .swiftpm/xcode/package.xcworkspace \
+  -scheme Wasmtime \
+  -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation),OS=26.5' \
+  -derivedDataPath .build/xcode-derived
+```
+
 Coverage:
 
 ```sh
@@ -333,6 +398,14 @@ scripts/vendor-wasmtime.sh v45.0.0
 ```
 
 The script downloads release metadata from GitHub, reads the official asset
-digests, downloads the supported C API archives, verifies SHA256 checksums,
-copies headers, preserves the upstream license, and stores platform libraries
-under `Vendor/Wasmtime`.
+digests, downloads the upstream C API archives where Wasmtime publishes them,
+verifies SHA256 checksums, copies headers, preserves the upstream license, and
+stores platform libraries under `Vendor/Wasmtime`.
+
+Wasmtime does not publish iOS or tvOS C API archives for `v45.0.0`, so on
+macOS the script also downloads the matching source release, builds
+`aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios`,
+`aarch64-apple-tvos`, and `aarch64-apple-tvos-sim` static libraries with Xcode
+and Rust, and packages them as
+`Vendor/Wasmtime/v45.0.0/Wasmtime.xcframework`. The iPadOS build uses the iOS
+XCFramework slices.
