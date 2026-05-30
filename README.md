@@ -6,8 +6,8 @@
 🪟 Windows is supported alongside macOS and Linux.
 
 Swift Wasmtime is a SwiftPM wrapper around the official Wasmtime C API. The
-package vendors Wasmtime C API libraries for macOS, Linux, and Windows, exposes a
-small Swift 6 API, and keeps the C ownership rules explicit.
+package vendors Wasmtime C API libraries, exposes a small Swift 6 API, and
+keeps the C ownership rules explicit.
 
 ## Project Status
 
@@ -19,12 +19,14 @@ The current vendoring model is intentionally pragmatic and somewhat subpar:
 Wasmtime is implemented in Rust and distributed to C consumers as prebuilt C API
 artifacts, while SwiftPM does not currently have a first-class cross-platform
 story for vendored Rust-built C ABI libraries. This package therefore vendors
-the official Wasmtime C API artifacts and uses linker search paths selected by
-platform and architecture. Ease of use from SwiftPM is important to this project,
-even though the packaging tradeoff is not as clean as a native SwiftPM C/C++
-source target. Upstream Rust toolchain requirements apply when building
-Wasmtime itself from source; normal Swift package consumers use the prebuilt C
-API artifacts vendored here.
+the official Wasmtime C API artifacts where upstream publishes them. Apple
+platforms are packaged as a `Wasmtime.xcframework`; Linux and Windows use
+vendored platform libraries plus linker search paths selected by platform and
+architecture. Ease of use from SwiftPM is important to this project, even though
+the packaging tradeoff is not as clean as a native SwiftPM C/C++ source target.
+Upstream Rust toolchain requirements apply when building Wasmtime itself from
+source; normal Swift package consumers use the prebuilt C API artifacts vendored
+here.
 
 ## Current Scope
 
@@ -87,25 +89,28 @@ API artifacts vendored here.
   stores. The remaining low-level extern definition surface for tags is not
   exposed yet.
 - Vendored Wasmtime version: `v45.0.0`.
-- Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`, plus
-  iOS/iPadOS and tvOS device and simulator slices through
-  `Wasmtime.xcframework`.
+- Vendored platforms: macOS, iOS/iPadOS, and tvOS through
+  `Wasmtime.xcframework`, plus Linux and Windows on `arm64`/`x86_64`.
 
-## Apple Mobile Platform Status
+## Apple Platform Status
 
-iOS, iPadOS, and tvOS support is experimental. SwiftPM consumers can depend on
-the package directly, and SwiftPM will select the vendored
-`Wasmtime.xcframework` slices for those platforms. The package does not build
-Wasmtime from Rust source inside consumer apps.
+SwiftPM consumers on macOS, iOS, iPadOS, and tvOS can depend on the package
+directly, and SwiftPM will select the vendored `Wasmtime.xcframework` slice for
+the target platform. The package does not build Wasmtime from Rust source inside
+consumer apps.
+
+macOS uses the official upstream Wasmtime C API release archives repackaged into
+the XCFramework. iOS, iPadOS, and tvOS support remains experimental.
 
 On iOS, iPadOS, and tvOS, `Engine` creation is forced to Wasmtime's Pulley
 interpreter (`pulley64`) so guest WebAssembly runs without native JIT
 execution. This is the intended path for Apple's mobile platform restrictions,
 but it means behavior and performance should be validated against the real app
-workload rather than assumed from desktop Wasmtime.
+workload rather than assumed from desktop or native-JIT Wasmtime.
 
-The current Apple mobile slices are:
+The current Apple slices are:
 
+- macOS: `arm64` and `x86_64`
 - iOS/iPadOS device: `arm64`
 - iOS/iPadOS simulator: `arm64` and `x86_64`
 - tvOS device: `arm64`
@@ -167,31 +172,29 @@ compile WAT/Wasm inputs into Pulley bytecode on device.
 
 ## Importing From SwiftPM
 
-Add the package dependency to your target. On iOS, iPadOS, and tvOS, the
+Add the package dependency to your target. On macOS, iOS, iPadOS, and tvOS, the
 package links the vendored `Wasmtime.xcframework` automatically.
 
-On macOS, Linux, and Windows, also point your target at the vendored Wasmtime
-library directory in SwiftPM's checkout. This mirrors the workaround used by
-downstream SwiftPM packages that need to stay inside SwiftPM without a system
-Wasmtime install.
+On Linux and Windows, also point your target at the vendored Wasmtime library
+directory in SwiftPM's checkout. This mirrors the workaround used by downstream
+SwiftPM packages that need to stay inside SwiftPM without a system Wasmtime
+install.
 
 SwiftPM may still warn about this package's own relative `Vendor/...` search
 path when it is built as a dependency; the consumer target search path below is
-the path that makes the final link step succeed for macOS, Linux, and Windows.
+the path that makes the final link step succeed for Linux and Windows.
 
 ```swift
 // swift-tools-version: 6.3
 
 import PackageDescription
 
-#if os(macOS)
-let wasmtimeOS = "macos"
-#elseif os(Linux)
+#if os(Linux)
 let wasmtimeOS = "linux"
 #elseif os(Windows)
 let wasmtimeOS = "windows"
 #else
-#error("this manual linker search path is only needed on macOS, Linux, and Windows")
+#error("this manual linker search path is only needed on Linux and Windows")
 #endif
 
 #if arch(arm64)
@@ -228,8 +231,8 @@ let package = Package(
 )
 ```
 
-For iOS, iPadOS, and tvOS consumer targets, omit the `linkerSettings` block
-above.
+For macOS, iOS, iPadOS, and tvOS consumer targets, omit the `linkerSettings`
+block above.
 
 Then import and use the Swift module:
 
@@ -402,10 +405,12 @@ digests, downloads the upstream C API archives where Wasmtime publishes them,
 verifies SHA256 checksums, copies headers, preserves the upstream license, and
 stores platform libraries under `Vendor/Wasmtime`.
 
-Wasmtime does not publish iOS or tvOS C API archives for `v45.0.0`, so on
-macOS the script also downloads the matching source release, builds
-`aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios`,
-`aarch64-apple-tvos`, and `aarch64-apple-tvos-sim` static libraries with Xcode
-and Rust, and packages them as
-`Vendor/Wasmtime/v45.0.0/Wasmtime.xcframework`. The iPadOS build uses the iOS
-XCFramework slices.
+On macOS, the script also packages the official `aarch64-macos` and
+`x86_64-macos` release archives into
+`Vendor/Wasmtime/v45.0.0/Wasmtime.xcframework`.
+
+Wasmtime does not publish iOS or tvOS C API archives for `v45.0.0`, so the
+script downloads the matching source release, builds `aarch64-apple-ios`,
+`aarch64-apple-ios-sim`, `x86_64-apple-ios`, `aarch64-apple-tvos`, and
+`aarch64-apple-tvos-sim` static libraries with Xcode and Rust, and adds them to
+the same XCFramework. The iPadOS build uses the iOS XCFramework slices.

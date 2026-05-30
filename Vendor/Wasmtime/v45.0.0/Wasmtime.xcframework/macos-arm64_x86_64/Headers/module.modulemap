@@ -1,0 +1,4 @@
+module CWasmtime {
+  header "wasmtime.h"
+  export *
+}

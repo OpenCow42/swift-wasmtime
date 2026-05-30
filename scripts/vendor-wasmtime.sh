@@ -103,6 +103,8 @@ patch_apple_mobile_source() {
   local source_path="$1"
 
   python3 - "$source_path" <<'PY'
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -136,6 +138,30 @@ replacements = {
             "assert!(!macos_use_mach_ports || !cfg!(any(target_os = \"macos\", target_os = \"ios\")));",
         ),
     ],
+    "vendor/iana-time-zone/Cargo.toml": [
+        (
+            "[target.'cfg(any(target_os = \"macos\", target_os = \"ios\"))'.dependencies.core-foundation-sys]\n",
+            "[target.'cfg(any(target_os = \"macos\", target_os = \"ios\", target_os = \"tvos\"))'.dependencies.core-foundation-sys]\n",
+        ),
+    ],
+    "vendor/iana-time-zone/Cargo.toml.orig": [
+        (
+            "[target.'cfg(any(target_os = \"macos\", target_os = \"ios\"))'.dependencies]\n",
+            "[target.'cfg(any(target_os = \"macos\", target_os = \"ios\", target_os = \"tvos\"))'.dependencies]\n",
+        ),
+    ],
+    "vendor/iana-time-zone/src/lib.rs": [
+        (
+            "#[cfg_attr(any(target_os = \"macos\", target_os = \"ios\"), path = \"tz_macos.rs\")]\n",
+            "#[cfg_attr(any(target_os = \"macos\", target_os = \"ios\", target_os = \"tvos\"), path = \"tz_macos.rs\")]\n",
+        ),
+    ],
+    "vendor/iana-time-zone/src/platform.rs": [
+        (
+            "    OpenBSD, Dragonfly, WebAssembly (browser), iOS, Illumos, Android, AIX, Solaris and Haiku.\",\n",
+            "    OpenBSD, Dragonfly, WebAssembly (browser), iOS, tvOS, Illumos, Android, AIX, Solaris and Haiku.\",\n",
+        ),
+    ],
 }
 
 for relative_path, edits in replacements.items():
@@ -146,10 +172,23 @@ for relative_path, edits in replacements.items():
             raise SystemExit(f"expected source text not found in {relative_path}")
         text = text.replace(old, new)
     path.write_text(text, encoding="utf-8")
-PY
 
-  cargo update --manifest-path "$source_path/Cargo.toml" \
-    -p iana-time-zone --precise 0.1.65
+checksum_path = root / "vendor/iana-time-zone/.cargo-checksum.json"
+if checksum_path.exists():
+    checksum = json.loads(checksum_path.read_text(encoding="utf-8"))
+    for relative_path in (
+        "Cargo.toml",
+        "Cargo.toml.orig",
+        "src/lib.rs",
+        "src/platform.rs",
+    ):
+        path = root / "vendor/iana-time-zone" / relative_path
+        checksum["files"][relative_path] = hashlib.sha256(path.read_bytes()).hexdigest()
+    checksum_path.write_text(
+        json.dumps(checksum, separators=(",", ":")),
+        encoding="utf-8",
+    )
+PY
 }
 
 for target in "${targets[@]}"; do
@@ -287,13 +326,22 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     )
   done
 
-  mkdir -p "$apple_universal_root/ios-simulator/lib" "$root/Vendor/Wasmtime/${version}"
+  mkdir -p \
+    "$apple_universal_root/macos/lib" \
+    "$apple_universal_root/ios-simulator/lib" \
+    "$root/Vendor/Wasmtime/${version}"
+  xcrun lipo -create \
+    "$root/Vendor/Wasmtime/${version}/aarch64-macos/lib/libwasmtime.a" \
+    "$root/Vendor/Wasmtime/${version}/x86_64-macos/lib/libwasmtime.a" \
+    -output "$apple_universal_root/macos/lib/libwasmtime.a"
   xcrun lipo -create \
     "$apple_install_root/aarch64-apple-ios-sim/lib/libwasmtime.a" \
     "$apple_install_root/x86_64-apple-ios/lib/libwasmtime.a" \
     -output "$apple_universal_root/ios-simulator/lib/libwasmtime.a"
 
   xcodebuild -create-xcframework \
+    -library "$apple_universal_root/macos/lib/libwasmtime.a" \
+    -headers "$root/Sources/CWasmtime/include" \
     -library "$apple_install_root/aarch64-apple-ios/lib/libwasmtime.a" \
     -headers "$apple_install_root/aarch64-apple-ios/include" \
     -library "$apple_universal_root/ios-simulator/lib/libwasmtime.a" \
@@ -304,7 +352,7 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     -headers "$apple_install_root/aarch64-apple-tvos-sim/include" \
     -output "$apple_xcframework"
 else
-  echo "Skipping iOS/iPadOS/tvOS XCFramework vendoring; building those slices requires macOS and Xcode." >&2
+  echo "Skipping Apple XCFramework vendoring; building those slices requires macOS and Xcode." >&2
 fi
 
 echo "Vendored Wasmtime ${version} C API artifacts."
