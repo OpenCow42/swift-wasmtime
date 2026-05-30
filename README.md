@@ -346,13 +346,18 @@ Wasmtime project under the same license. See `LICENSE` and
 ## Build And Test
 
 For local development with Xcode on macOS, keep Swift and Clang module caches
-inside the workspace:
+inside the workspace and run the normal SwiftPM test gate:
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" \
-swift test --disable-sandbox
+swift test
 ```
+
+The macOS package path links Wasmtime through the vendored XCFramework, so it
+does not require SwiftPM's sandbox to be disabled. If a nested automation or
+outer sandbox blocks SwiftPM's own sandbox integration, add
+`--disable-sandbox` as a local fallback.
 
 iOS/iPadOS simulator test gate:
 
