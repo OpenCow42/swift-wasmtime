@@ -51,6 +51,23 @@ import Testing
     #expect(try emptyCaller.writeMemory(offset: 0, bytes: []) == false)
 }
 
+@Test func engineCanReportPulleyExecutionBackend() throws {
+#if os(iOS)
+    let engine = try Engine()
+    #expect(engine.isUsingPulley)
+
+    let nativeConfig = try Config()
+    try nativeConfig.setTarget(nativeTargetTriple)
+    let configuredEngine = try Engine(config: nativeConfig)
+    #expect(configuredEngine.isUsingPulley)
+#else
+    let pulleyConfig = try Config()
+    try pulleyConfig.setTarget("pulley64")
+    let pulleyEngine = try Engine(config: pulleyConfig)
+    #expect(pulleyEngine.isUsingPulley)
+#endif
+}
+
 @Test func compilesWatWasmBytesAndData() throws {
     let engine = try Engine()
     let wasm = try WasmText.compile("(module)")

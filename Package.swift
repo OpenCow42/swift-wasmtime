@@ -25,6 +25,10 @@ let wasmtimeLibraryPath = "Vendor/Wasmtime/\(wasmtimeVersion)/\(wasmtimeArch)-\(
 
 let package = Package(
     name: "Wasmtime",
+    platforms: [
+        .macOS(.v11),
+        .iOS(.v13),
+    ],
     products: [
         .library(
             name: "Wasmtime",
@@ -38,14 +42,18 @@ let package = Package(
         ),
         .target(
             name: "Wasmtime",
-            dependencies: ["CWasmtime"],
+            dependencies: [
+                "CWasmtime",
+                .target(name: "WasmtimeAppleSupport", condition: .when(platforms: [.iOS])),
+            ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
             ],
             linkerSettings: [
-                .unsafeFlags(["-L", wasmtimeLibraryPath]),
+                .unsafeFlags(["-L", wasmtimeLibraryPath], .when(platforms: [.macOS, .linux, .windows])),
                 .linkedLibrary("wasmtime", .when(platforms: [.macOS, .linux])),
                 .linkedLibrary("wasmtime.dll", .when(platforms: [.windows])),
+                .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS])),
                 .linkedLibrary("pthread", .when(platforms: [.linux])),
                 .linkedLibrary("dl", .when(platforms: [.linux])),
                 .linkedLibrary("m", .when(platforms: [.linux])),
@@ -60,6 +68,10 @@ let package = Package(
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
             ]
+        ),
+        .binaryTarget(
+            name: "WasmtimeAppleSupport",
+            path: "Vendor/Wasmtime/\(wasmtimeVersion)/Wasmtime.xcframework"
         ),
     ],
     swiftLanguageModes: [.v6]

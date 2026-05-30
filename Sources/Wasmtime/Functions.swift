@@ -3,7 +3,7 @@ import Foundation
 
 #if os(Linux)
 import Glibc
-#elseif os(macOS)
+#elseif canImport(Darwin)
 import Darwin
 #endif
 

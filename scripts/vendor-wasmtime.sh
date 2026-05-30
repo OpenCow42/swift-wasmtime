@@ -27,6 +27,15 @@ require python3
 require shasum
 require tar
 
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  require cargo
+  require cmake
+  require ninja
+  require rustup
+  require xcodebuild
+  require xcrun
+fi
+
 mkdir -p "$work"
 curl -fsSL "https://api.github.com/repos/${repo}/releases/tags/${version}" -o "$release_json"
 mkdir -p "$root/Vendor/Wasmtime/${version}"
@@ -51,6 +60,43 @@ for asset in release["assets"]:
         raise SystemExit(0)
 raise SystemExit(f"missing release asset: {name}")
 PY
+}
+
+release_asset_field() {
+  local name="$1"
+  local field="$2"
+  python3 - "$release_json" "$name" "$field" <<'PY'
+import json
+import sys
+
+release_path, name, field = sys.argv[1:]
+with open(release_path, encoding="utf-8") as handle:
+    release = json.load(handle)
+for asset in release["assets"]:
+    if asset["name"] == name:
+        print(asset[field])
+        raise SystemExit(0)
+raise SystemExit(f"missing release asset: {name}")
+PY
+}
+
+download_verified_asset() {
+  local name="$1"
+  local path="$2"
+  local url expected actual
+
+  url="$(release_asset_field "$name" browser_download_url)"
+  expected="$(release_asset_field "$name" digest)"
+  expected="${expected#sha256:}"
+
+  curl -fL "$url" -o "$path"
+  actual="$(shasum -a 256 "$path" | awk '{print $1}')"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "checksum mismatch for ${name}" >&2
+    echo "expected: ${expected}" >&2
+    echo "actual:   ${actual}" >&2
+    exit 1
+  fi
 }
 
 for target in "${targets[@]}"; do
@@ -124,5 +170,62 @@ module CWasmtime {
 EOF
   fi
 done
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  source_archive="wasmtime-${version}-src.tar.gz"
+  source_archive_path="${work}/${source_archive}"
+  source_path="${work}/source"
+  ios_install_root="${work}/ios-install"
+  ios_universal_root="${work}/ios-universal"
+  ios_xcframework="$root/Vendor/Wasmtime/${version}/Wasmtime.xcframework"
+
+  download_verified_asset "$source_archive" "$source_archive_path"
+  rm -rf "$source_path" "$ios_install_root" "$ios_universal_root" "$ios_xcframework"
+  mkdir -p "$source_path" "$ios_install_root" "$ios_universal_root"
+  tar -xzf "$source_archive_path" -C "$source_path" --strip-components 1
+
+  rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+  export IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-13.0}"
+  export CARGO_PROFILE_RELEASE_STRIP="${CARGO_PROFILE_RELEASE_STRIP:-debuginfo}"
+  export CARGO_PROFILE_RELEASE_PANIC="${CARGO_PROFILE_RELEASE_PANIC:-abort}"
+  export CARGO_PROFILE_RELEASE_LTO="${CARGO_PROFILE_RELEASE_LTO:-true}"
+  export RUSTFLAGS="${RUSTFLAGS:-} -C force-unwind-tables"
+
+  ios_targets=(
+    "aarch64-apple-ios"
+    "aarch64-apple-ios-sim"
+    "x86_64-apple-ios"
+  )
+
+  for target in "${ios_targets[@]}"; do
+    build_path="${work}/ios-build/${target}"
+    install_path="${ios_install_root}/${target}"
+    cmake \
+      -G Ninja \
+      "$source_path/crates/c-api" \
+      -B "$build_path" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DWASMTIME_TARGET="$target" \
+      -DCMAKE_INSTALL_PREFIX="$install_path" \
+      -DCMAKE_INSTALL_LIBDIR=lib
+    cmake --build "$build_path" --target install
+  done
+
+  mkdir -p "$ios_universal_root/lib" "$root/Vendor/Wasmtime/${version}"
+  xcrun lipo -create \
+    "$ios_install_root/aarch64-apple-ios-sim/lib/libwasmtime.a" \
+    "$ios_install_root/x86_64-apple-ios/lib/libwasmtime.a" \
+    -output "$ios_universal_root/lib/libwasmtime.a"
+
+  xcodebuild -create-xcframework \
+    -library "$ios_install_root/aarch64-apple-ios/lib/libwasmtime.a" \
+    -headers "$ios_install_root/aarch64-apple-ios/include" \
+    -library "$ios_universal_root/lib/libwasmtime.a" \
+    -headers "$ios_install_root/aarch64-apple-ios-sim/include" \
+    -output "$ios_xcframework"
+else
+  echo "Skipping iOS/iPadOS XCFramework vendoring; building those slices requires macOS and Xcode." >&2
+fi
 
 echo "Vendored Wasmtime ${version} C API artifacts."

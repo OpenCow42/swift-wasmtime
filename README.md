@@ -87,7 +87,8 @@ API artifacts vendored here.
   stores. The remaining low-level extern definition surface for tags is not
   exposed yet.
 - Vendored Wasmtime version: `v45.0.0`.
-- Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`.
+- Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`, plus
+  iOS/iPadOS device and simulator slices through `Wasmtime.xcframework`.
 
 ## Runtime Safety
 
@@ -130,16 +131,24 @@ handles or store-bound frame instance handles. This keeps diagnostic values
 `Sendable` and safe to retain after the original trap or error has been
 released.
 
+On iOS and iPadOS, `Engine` creation always targets Wasmtime's Pulley
+interpreter (`pulley64`) so guest code runs without native JIT execution.
+Cranelift remains present in the vendored C API so this package can still
+compile WAT/Wasm inputs into Pulley bytecode on device.
+
 ## Importing From SwiftPM
 
-Add the package dependency and point your target at the vendored Wasmtime library
-directory in SwiftPM's checkout. This mirrors the workaround used by downstream
-SwiftPM packages that need to stay inside SwiftPM without XCFrameworks or a
-system Wasmtime install.
+Add the package dependency to your target. On iOS and iPadOS, the package links
+the vendored `Wasmtime.xcframework` automatically.
+
+On macOS, Linux, and Windows, also point your target at the vendored Wasmtime
+library directory in SwiftPM's checkout. This mirrors the workaround used by
+downstream SwiftPM packages that need to stay inside SwiftPM without a system
+Wasmtime install.
 
 SwiftPM may still warn about this package's own relative `Vendor/...` search
 path when it is built as a dependency; the consumer target search path below is
-the path that makes the final link step succeed.
+the path that makes the final link step succeed for macOS, Linux, and Windows.
 
 ```swift
 // swift-tools-version: 6.3
@@ -153,7 +162,7 @@ let wasmtimeOS = "linux"
 #elseif os(Windows)
 let wasmtimeOS = "windows"
 #else
-#error("swift-wasmtime currently supports macOS, Linux, and Windows")
+#error("this manual linker search path is only needed on macOS, Linux, and Windows")
 #endif
 
 #if arch(arm64)
@@ -189,6 +198,8 @@ let package = Package(
     swiftLanguageModes: [.v6]
 )
 ```
+
+For iOS and iPadOS consumer targets, omit the `linkerSettings` block above.
 
 Then import and use the Swift module:
 
@@ -310,6 +321,18 @@ CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" \
 swift test --disable-sandbox
 ```
 
+iOS/iPadOS simulator test gate:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" \
+xcodebuild test \
+  -workspace .swiftpm/xcode/package.xcworkspace \
+  -scheme Wasmtime \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+  -derivedDataPath .build/xcode-derived
+```
+
 Coverage:
 
 ```sh
@@ -333,6 +356,11 @@ scripts/vendor-wasmtime.sh v45.0.0
 ```
 
 The script downloads release metadata from GitHub, reads the official asset
-digests, downloads the supported C API archives, verifies SHA256 checksums,
-copies headers, preserves the upstream license, and stores platform libraries
-under `Vendor/Wasmtime`.
+digests, downloads the upstream C API archives where Wasmtime publishes them,
+verifies SHA256 checksums, copies headers, preserves the upstream license, and
+stores platform libraries under `Vendor/Wasmtime`.
+
+Wasmtime does not publish iOS C API archives for `v45.0.0`, so on macOS the
+script also downloads the matching source release, builds `aarch64-apple-ios`,
+`aarch64-apple-ios-sim`, and `x86_64-apple-ios` static libraries with Xcode and
+Rust, and packages them as `Vendor/Wasmtime/v45.0.0/Wasmtime.xcframework`.

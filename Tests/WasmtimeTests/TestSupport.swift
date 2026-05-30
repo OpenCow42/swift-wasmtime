@@ -81,6 +81,14 @@ let nativeTargetTriple = {
     "aarch64-apple-darwin"
     #elseif os(macOS) && arch(x86_64)
     "x86_64-apple-darwin"
+    #elseif os(iOS) && arch(arm64)
+    #if targetEnvironment(simulator)
+    "aarch64-apple-ios-sim"
+    #else
+    "aarch64-apple-ios"
+    #endif
+    #elseif os(iOS) && targetEnvironment(simulator) && arch(x86_64)
+    "x86_64-apple-ios"
     #elseif os(Linux) && arch(arm64)
     "aarch64-unknown-linux-gnu"
     #elseif os(Linux) && arch(x86_64)
