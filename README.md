@@ -91,6 +91,34 @@ API artifacts vendored here.
   iOS/iPadOS and tvOS device and simulator slices through
   `Wasmtime.xcframework`.
 
+## Apple Mobile Platform Status
+
+iOS, iPadOS, and tvOS support is experimental. SwiftPM consumers can depend on
+the package directly, and SwiftPM will select the vendored
+`Wasmtime.xcframework` slices for those platforms. The package does not build
+Wasmtime from Rust source inside consumer apps.
+
+On iOS, iPadOS, and tvOS, `Engine` creation is forced to Wasmtime's Pulley
+interpreter (`pulley64`) so guest WebAssembly runs without native JIT
+execution. This is the intended path for Apple's mobile platform restrictions,
+but it means behavior and performance should be validated against the real app
+workload rather than assumed from desktop Wasmtime.
+
+The current Apple mobile slices are:
+
+- iOS/iPadOS device: `arm64`
+- iOS/iPadOS simulator: `arm64` and `x86_64`
+- tvOS device: `arm64`
+- tvOS simulator: `arm64`
+
+iPadOS uses the iOS XCFramework slices. tvOS is more provisional than iOS and
+iPadOS: the full test suite passes on the tvOS simulator and the package
+cross-builds for tvOS device targets, but this project has not yet added a
+physical Apple TV, TestFlight, or App Store validation gate. Wasmtime also does
+not publish official iOS or tvOS C API artifacts for `v45.0.0`, so these slices
+are built from source by this repository's vendoring script. watchOS is not
+supported.
+
 ## Runtime Safety
 
 Prefer `WasmtimeRuntime` when values cross Swift concurrency domains. It keeps
