@@ -52,7 +52,7 @@ import Testing
 }
 
 @Test func engineCanReportPulleyExecutionBackend() throws {
-#if os(iOS)
+#if os(iOS) || os(tvOS)
     let engine = try Engine()
     #expect(engine.isUsingPulley)
 

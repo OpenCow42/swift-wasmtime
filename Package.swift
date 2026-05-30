@@ -28,6 +28,7 @@ let package = Package(
     platforms: [
         .macOS(.v11),
         .iOS(.v13),
+        .tvOS(.v13),
     ],
     products: [
         .library(
@@ -44,7 +45,7 @@ let package = Package(
             name: "Wasmtime",
             dependencies: [
                 "CWasmtime",
-                .target(name: "WasmtimeAppleSupport", condition: .when(platforms: [.iOS])),
+                .target(name: "WasmtimeAppleSupport", condition: .when(platforms: [.iOS, .tvOS])),
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
@@ -53,7 +54,7 @@ let package = Package(
                 .unsafeFlags(["-L", wasmtimeLibraryPath], .when(platforms: [.macOS, .linux, .windows])),
                 .linkedLibrary("wasmtime", .when(platforms: [.macOS, .linux])),
                 .linkedLibrary("wasmtime.dll", .when(platforms: [.windows])),
-                .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS])),
+                .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS, .tvOS])),
                 .linkedLibrary("pthread", .when(platforms: [.linux])),
                 .linkedLibrary("dl", .when(platforms: [.linux])),
                 .linkedLibrary("m", .when(platforms: [.linux])),

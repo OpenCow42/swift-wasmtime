@@ -88,7 +88,8 @@ API artifacts vendored here.
   exposed yet.
 - Vendored Wasmtime version: `v45.0.0`.
 - Vendored platforms: macOS, Linux, and Windows on `arm64`/`x86_64`, plus
-  iOS/iPadOS device and simulator slices through `Wasmtime.xcframework`.
+  iOS/iPadOS and tvOS device and simulator slices through
+  `Wasmtime.xcframework`.
 
 ## Runtime Safety
 
@@ -131,15 +132,15 @@ handles or store-bound frame instance handles. This keeps diagnostic values
 `Sendable` and safe to retain after the original trap or error has been
 released.
 
-On iOS and iPadOS, `Engine` creation always targets Wasmtime's Pulley
+On iOS, iPadOS, and tvOS, `Engine` creation always targets Wasmtime's Pulley
 interpreter (`pulley64`) so guest code runs without native JIT execution.
 Cranelift remains present in the vendored C API so this package can still
 compile WAT/Wasm inputs into Pulley bytecode on device.
 
 ## Importing From SwiftPM
 
-Add the package dependency to your target. On iOS and iPadOS, the package links
-the vendored `Wasmtime.xcframework` automatically.
+Add the package dependency to your target. On iOS, iPadOS, and tvOS, the
+package links the vendored `Wasmtime.xcframework` automatically.
 
 On macOS, Linux, and Windows, also point your target at the vendored Wasmtime
 library directory in SwiftPM's checkout. This mirrors the workaround used by
@@ -199,7 +200,8 @@ let package = Package(
 )
 ```
 
-For iOS and iPadOS consumer targets, omit the `linkerSettings` block above.
+For iOS, iPadOS, and tvOS consumer targets, omit the `linkerSettings` block
+above.
 
 Then import and use the Swift module:
 
@@ -333,6 +335,18 @@ xcodebuild test \
   -derivedDataPath .build/xcode-derived
 ```
 
+tvOS simulator test gate:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" \
+xcodebuild test \
+  -workspace .swiftpm/xcode/package.xcworkspace \
+  -scheme Wasmtime \
+  -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation),OS=26.5' \
+  -derivedDataPath .build/xcode-derived
+```
+
 Coverage:
 
 ```sh
@@ -360,7 +374,10 @@ digests, downloads the upstream C API archives where Wasmtime publishes them,
 verifies SHA256 checksums, copies headers, preserves the upstream license, and
 stores platform libraries under `Vendor/Wasmtime`.
 
-Wasmtime does not publish iOS C API archives for `v45.0.0`, so on macOS the
-script also downloads the matching source release, builds `aarch64-apple-ios`,
-`aarch64-apple-ios-sim`, and `x86_64-apple-ios` static libraries with Xcode and
-Rust, and packages them as `Vendor/Wasmtime/v45.0.0/Wasmtime.xcframework`.
+Wasmtime does not publish iOS or tvOS C API archives for `v45.0.0`, so on
+macOS the script also downloads the matching source release, builds
+`aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios`,
+`aarch64-apple-tvos`, and `aarch64-apple-tvos-sim` static libraries with Xcode
+and Rust, and packages them as
+`Vendor/Wasmtime/v45.0.0/Wasmtime.xcframework`. The iPadOS build uses the iOS
+XCFramework slices.

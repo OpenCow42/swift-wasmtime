@@ -262,7 +262,7 @@ public final class Config {
     }
 
     func enforcePlatformRuntime() throws {
-#if os(iOS)
+#if os(iOS) || os(tvOS)
         try setTarget("pulley64")
 #endif
     }
@@ -573,7 +573,7 @@ public final class Engine: @unchecked Sendable {
         ensureWasmtimeRuntimeLibraryIsDiscoverable()
 #endif
 
-#if os(iOS)
+#if os(iOS) || os(tvOS)
         let config = try Config()
         try self.init(config: config)
 #else
