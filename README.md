@@ -391,11 +391,12 @@ CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" \
 scripts/test-coverage.sh
 ```
 
-The coverage script focuses on `Sources/Wasmtime` and excludes the vendored C
-headers, C shim, fixtures, and package plumbing. Lines marked
-`coverage:ignore` are narrow defensive C-interop branches that cannot be
-reached deterministically from Swift without faking Wasmtime allocation failure
-or intentionally triggering a process abort.
+The validation goal is 100% line coverage for `Sources/Wasmtime`.
+`scripts/test-coverage.sh` enforces a 100% threshold by default and excludes the
+vendored C headers, C shim, fixtures, and package plumbing. Lines marked
+`coverage:ignore` are narrow defensive C-interop branches that cannot be reached
+deterministically from Swift without faking Wasmtime allocation failure or
+intentionally triggering a process abort.
 
 ## Vendoring Wasmtime
 
