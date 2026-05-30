@@ -39,6 +39,9 @@ fi
 mkdir -p "$work"
 curl -fsSL "https://api.github.com/repos/${repo}/releases/tags/${version}" -o "$release_json"
 mkdir -p "$root/Vendor/Wasmtime/${version}"
+rm -rf \
+  "$root/Vendor/Wasmtime/${version}/aarch64-macos" \
+  "$root/Vendor/Wasmtime/${version}/x86_64-macos"
 curl -fsSL "https://raw.githubusercontent.com/${repo}/${version}/LICENSE" \
   -o "$root/Vendor/Wasmtime/${version}/LICENSE"
 
@@ -241,15 +244,6 @@ PY
     tar -xf "$archive_path" -C "$extract_path" --strip-components 1
   fi
 
-  mkdir -p "$root/Vendor/Wasmtime/${version}/${target}/lib"
-  if [[ "$target" == *"-windows" ]]; then
-    cp "$extract_path/lib/wasmtime.lib" "$root/Vendor/Wasmtime/${version}/${target}/lib/wasmtime.lib"
-    cp "$extract_path/lib/wasmtime.dll.lib" "$root/Vendor/Wasmtime/${version}/${target}/lib/wasmtime.dll.lib"
-    cp "$extract_path/lib/wasmtime.dll" "$root/Vendor/Wasmtime/${version}/${target}/lib/wasmtime.dll"
-  else
-    cp "$extract_path/lib/libwasmtime.a" "$root/Vendor/Wasmtime/${version}/${target}/lib/libwasmtime.a"
-  fi
-
   if [[ "$target" == "aarch64-macos" ]]; then
     rm -rf "$root/Sources/CWasmtime/include"
     mkdir -p "$root/Sources/CWasmtime/include"
@@ -260,6 +254,19 @@ module CWasmtime {
   export *
 }
 EOF
+  fi
+
+  if [[ "$target" == *"-macos" ]]; then
+    continue
+  fi
+
+  mkdir -p "$root/Vendor/Wasmtime/${version}/${target}/lib"
+  if [[ "$target" == *"-windows" ]]; then
+    cp "$extract_path/lib/wasmtime.lib" "$root/Vendor/Wasmtime/${version}/${target}/lib/wasmtime.lib"
+    cp "$extract_path/lib/wasmtime.dll.lib" "$root/Vendor/Wasmtime/${version}/${target}/lib/wasmtime.dll.lib"
+    cp "$extract_path/lib/wasmtime.dll" "$root/Vendor/Wasmtime/${version}/${target}/lib/wasmtime.dll"
+  else
+    cp "$extract_path/lib/libwasmtime.a" "$root/Vendor/Wasmtime/${version}/${target}/lib/libwasmtime.a"
   fi
 done
 
@@ -331,8 +338,8 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     "$apple_universal_root/ios-simulator/lib" \
     "$root/Vendor/Wasmtime/${version}"
   xcrun lipo -create \
-    "$root/Vendor/Wasmtime/${version}/aarch64-macos/lib/libwasmtime.a" \
-    "$root/Vendor/Wasmtime/${version}/x86_64-macos/lib/libwasmtime.a" \
+    "$work/aarch64-macos/lib/libwasmtime.a" \
+    "$work/x86_64-macos/lib/libwasmtime.a" \
     -output "$apple_universal_root/macos/lib/libwasmtime.a"
   xcrun lipo -create \
     "$apple_install_root/aarch64-apple-ios-sim/lib/libwasmtime.a" \

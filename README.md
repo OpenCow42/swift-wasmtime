@@ -412,7 +412,8 @@ stores platform libraries under `Vendor/Wasmtime`.
 
 On macOS, the script also packages the official `aarch64-macos` and
 `x86_64-macos` release archives into
-`Vendor/Wasmtime/v45.0.0/Wasmtime.xcframework`.
+`Vendor/Wasmtime/v45.0.0/Wasmtime.xcframework`; it does not keep separate
+vendored macOS library directories outside the XCFramework.
 
 Wasmtime does not publish iOS or tvOS C API archives for `v45.0.0`, so the
 script downloads the matching source release, builds `aarch64-apple-ios`,
