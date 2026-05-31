@@ -10,8 +10,8 @@ if [[ -d /Applications/Xcode.app/Contents/Developer && -z "${DEVELOPER_DIR:-}" ]
 fi
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$root/.build/clang-module-cache}"
 
-swift test --disable-sandbox --enable-code-coverage
-coverage_json="$(swift test --disable-sandbox --show-codecov-path)"
+swift test --enable-code-coverage
+coverage_json="$(swift test --show-codecov-path)"
 
 python3 - "$coverage_json" "$threshold" <<'PY'
 import json

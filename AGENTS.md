@@ -25,11 +25,21 @@ well tested.
 
 - Run `swift build` after C interop changes.
 - Run `swift test` after API changes.
-- Run `scripts/test-coverage.sh` before declaring coverage work complete.
+- This project targets 100% line coverage for `Sources/Wasmtime`. Run
+  `scripts/test-coverage.sh` before declaring validation complete; the default
+  coverage threshold is 100%.
 - `coverage:ignore` is allowed only for defensive FFI branches that cannot be
   reached deterministically from Swift, such as C allocation returning nil,
   impossible type metadata nils, Swift `String` failing UTF-8 validation, or
   intentional precondition crash branches.
+
+## Commit And PR Titles
+
+- Use Conventional Commits for commit messages and pull request titles, such as
+  `feat: add memory helpers`, `fix: handle trap ownership`, or
+  `build: package macOS as an XCFramework`.
+- Pick the narrowest accurate type (`feat`, `fix`, `docs`, `test`, `build`,
+  `ci`, `refactor`, or `chore`) and keep the subject imperative and concise.
 
 ## Release Tags
 

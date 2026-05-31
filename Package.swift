@@ -3,7 +3,7 @@
 import PackageDescription
 
 #if os(macOS)
-let wasmtimeOS = "macos"
+let wasmtimeOS = "apple-xcframework"
 #elseif os(Linux)
 let wasmtimeOS = "linux"
 #elseif os(Windows)
@@ -45,14 +45,14 @@ let package = Package(
             name: "Wasmtime",
             dependencies: [
                 "CWasmtime",
-                .target(name: "WasmtimeAppleSupport", condition: .when(platforms: [.iOS, .tvOS])),
+                .target(name: "WasmtimeAppleSupport", condition: .when(platforms: [.macOS, .iOS, .tvOS])),
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency"),
             ],
             linkerSettings: [
-                .unsafeFlags(["-L", wasmtimeLibraryPath], .when(platforms: [.macOS, .linux, .windows])),
-                .linkedLibrary("wasmtime", .when(platforms: [.macOS, .linux])),
+                .unsafeFlags(["-L", wasmtimeLibraryPath], .when(platforms: [.linux, .windows])),
+                .linkedLibrary("wasmtime", .when(platforms: [.linux])),
                 .linkedLibrary("wasmtime.dll", .when(platforms: [.windows])),
                 .linkedFramework("CoreFoundation", .when(platforms: [.macOS, .iOS, .tvOS])),
                 .linkedLibrary("pthread", .when(platforms: [.linux])),
