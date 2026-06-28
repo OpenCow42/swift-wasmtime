@@ -1,7 +1,7 @@
 # Swift Wasmtime Roadmap
 
 This roadmap tracks missing Swift API coverage compared with the vendored
-Wasmtime C API in `Sources/CWasmtime/include` for Wasmtime `v45.0.2`.
+Wasmtime C API in `Sources/CWasmtime/include` for Wasmtime `v46.0.1`.
 
 Swift Wasmtime is not trying to mirror every C function one-for-one. The goal is
 to grow a small, memory-safe, Swift 6-friendly API while making intentional gaps

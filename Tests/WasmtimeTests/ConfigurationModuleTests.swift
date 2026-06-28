@@ -299,6 +299,7 @@ import Testing
     config.isMultiMemoryEnabled = true
     config.isMemory64Enabled = true
     config.isWideArithmeticEnabled = true
+    config.isBranchHintingEnabled = true
     config.areExceptionsEnabled = true
     config.areCustomPageSizesEnabled = true
     config.debugInfo = true
@@ -365,6 +366,7 @@ import Testing
         isMultiMemoryEnabled: true,
         isMemory64Enabled: true,
         isWideArithmeticEnabled: true,
+        isBranchHintingEnabled: true,
         areExceptionsEnabled: true,
         areCustomPageSizesEnabled: true,
         strategy: .cranelift,
@@ -407,6 +409,7 @@ import Testing
     #expect(options.isMultiMemoryEnabled)
     #expect(options.isMemory64Enabled)
     #expect(options.isWideArithmeticEnabled)
+    #expect(options.isBranchHintingEnabled)
     #expect(options.areExceptionsEnabled)
     #expect(options.areCustomPageSizesEnabled)
     #expect(options.craneliftRegallocAlgorithm == .singlePass)

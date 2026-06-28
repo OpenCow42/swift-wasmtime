@@ -117,6 +117,12 @@ public final class Config {
         }
     }
 
+    public var isBranchHintingEnabled: Bool = false {
+        didSet {
+            wasmtime_config_wasm_branch_hinting_set(requiredRaw, isBranchHintingEnabled)
+        }
+    }
+
     public var areExceptionsEnabled: Bool = false {
         didSet {
             wasmtime_config_wasm_exceptions_set(requiredRaw, areExceptionsEnabled)
@@ -296,6 +302,7 @@ public final class Config {
         isMultiMemoryEnabled = options.isMultiMemoryEnabled
         isMemory64Enabled = options.isMemory64Enabled
         isWideArithmeticEnabled = options.isWideArithmeticEnabled
+        isBranchHintingEnabled = options.isBranchHintingEnabled
         areExceptionsEnabled = options.areExceptionsEnabled
         areCustomPageSizesEnabled = options.areCustomPageSizesEnabled
         strategy = options.strategy
@@ -378,6 +385,7 @@ public struct EngineOptions: Sendable, Equatable {
     public var isMultiMemoryEnabled: Bool
     public var isMemory64Enabled: Bool
     public var isWideArithmeticEnabled: Bool
+    public var isBranchHintingEnabled: Bool
     public var areExceptionsEnabled: Bool
     public var areCustomPageSizesEnabled: Bool
     public var strategy: CompilationStrategy
@@ -417,6 +425,7 @@ public struct EngineOptions: Sendable, Equatable {
         isMultiMemoryEnabled: Bool = true,
         isMemory64Enabled: Bool = false,
         isWideArithmeticEnabled: Bool = false,
+        isBranchHintingEnabled: Bool = false,
         areExceptionsEnabled: Bool = false,
         areCustomPageSizesEnabled: Bool = false,
         strategy: CompilationStrategy = .automatic,
@@ -455,6 +464,7 @@ public struct EngineOptions: Sendable, Equatable {
         self.isMultiMemoryEnabled = isMultiMemoryEnabled
         self.isMemory64Enabled = isMemory64Enabled
         self.isWideArithmeticEnabled = isWideArithmeticEnabled
+        self.isBranchHintingEnabled = isBranchHintingEnabled
         self.areExceptionsEnabled = areExceptionsEnabled
         self.areCustomPageSizesEnabled = areCustomPageSizesEnabled
         self.strategy = strategy

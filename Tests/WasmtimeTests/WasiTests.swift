@@ -190,6 +190,26 @@ import Testing
     #expect(writable == "")
 }
 
+@Test func wasiPathRenameAndLinkRespectDestinationFilePermissions() throws {
+    let mismatched = try runWasiDestinationMutationAttempt(
+        sourceFilePermissions: [.read],
+        destinationFilePermissions: [.read, .write]
+    )
+    #expect(mismatched.renameSourceExists)
+    #expect(!mismatched.renameTargetExists)
+    #expect(mismatched.linkSourceExists)
+    #expect(!mismatched.linkTargetExists)
+
+    let matched = try runWasiDestinationMutationAttempt(
+        sourceFilePermissions: [.read, .write],
+        destinationFilePermissions: [.read, .write]
+    )
+    #expect(!matched.renameSourceExists)
+    #expect(matched.renameTargetContents == "rename\n")
+    #expect(matched.linkSourceExists)
+    #expect(matched.linkTargetContents == "link\n")
+}
+
 @Test func wasiFdRenumberReplacesDestinationDescriptor() throws {
     let temporary = testTemporaryDirectory()
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
@@ -247,6 +267,67 @@ private func runWasiTruncateAttempt(filePermissions: WasiFilePermissions) throws
     return try String(contentsOf: target, encoding: .utf8)
 }
 
+private struct WasiDestinationMutationResult {
+    var renameSourceExists: Bool
+    var renameTargetExists: Bool
+    var renameTargetContents: String?
+    var linkSourceExists: Bool
+    var linkTargetExists: Bool
+    var linkTargetContents: String?
+}
+
+private func runWasiDestinationMutationAttempt(
+    sourceFilePermissions: WasiFilePermissions,
+    destinationFilePermissions: WasiFilePermissions
+) throws -> WasiDestinationMutationResult {
+    let temporary = testTemporaryDirectory()
+        .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
+    let sourceDirectory = temporary.appendingPathComponent("source", isDirectory: true)
+    let destinationDirectory = temporary.appendingPathComponent("destination", isDirectory: true)
+    let renameSource = sourceDirectory.appendingPathComponent("rename-source.txt")
+    let renameTarget = destinationDirectory.appendingPathComponent("rename-target.txt")
+    let linkSource = sourceDirectory.appendingPathComponent("link-source.txt")
+    let linkTarget = destinationDirectory.appendingPathComponent("link-target.txt")
+    try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    try "rename\n".write(to: renameSource, atomically: true, encoding: .utf8)
+    try "link\n".write(to: linkSource, atomically: true, encoding: .utf8)
+
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(engine: engine, wat: wasiDestinationMutationWat)
+    let wasi = try WasiConfig()
+    try wasi.preopenDirectory(
+        hostPath: sourceDirectory.path,
+        guestPath: "/source",
+        directoryPermissions: [.read, .write],
+        filePermissions: sourceFilePermissions
+    )
+    try wasi.preopenDirectory(
+        hostPath: destinationDirectory.path,
+        guestPath: "/destination",
+        directoryPermissions: [.read, .write],
+        filePermissions: destinationFilePermissions
+    )
+    try store.setWasi(wasi)
+    let linker = try Linker(engine: engine)
+    try linker.defineWasi()
+    let instance = try linker.instantiate(store: store, module: module)
+
+    #expect(try instance.exportedFunction(named: "_start").call() == [])
+    let renameTargetExists = FileManager.default.fileExists(atPath: renameTarget.path)
+    let linkTargetExists = FileManager.default.fileExists(atPath: linkTarget.path)
+    return WasiDestinationMutationResult(
+        renameSourceExists: FileManager.default.fileExists(atPath: renameSource.path),
+        renameTargetExists: renameTargetExists,
+        renameTargetContents: renameTargetExists ? try String(contentsOf: renameTarget, encoding: .utf8) : nil,
+        linkSourceExists: FileManager.default.fileExists(atPath: linkSource.path),
+        linkTargetExists: linkTargetExists,
+        linkTargetContents: linkTargetExists ? try String(contentsOf: linkTarget, encoding: .utf8) : nil
+    )
+}
+
 private let wasiTruncateWat = """
 (module
   (import "wasi_snapshot_preview1" "path_open" (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
@@ -265,6 +346,36 @@ private let wasiTruncateWat = """
     i32.const 48
     call $path_open
     local.set $errno))
+"""
+
+private let wasiDestinationMutationWat = """
+(module
+  (import "wasi_snapshot_preview1" "path_rename" (func $path_rename (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "path_link" (func $path_link (param i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (memory 1)
+  (export "memory" (memory 0))
+  (data (i32.const 64) "rename-source.txt")
+  (data (i32.const 96) "rename-target.txt")
+  (data (i32.const 128) "link-source.txt")
+  (data (i32.const 160) "link-target.txt")
+  (func (export "_start")
+    i32.const 3
+    i32.const 64
+    i32.const 17
+    i32.const 4
+    i32.const 96
+    i32.const 17
+    call $path_rename
+    drop
+    i32.const 3
+    i32.const 0
+    i32.const 128
+    i32.const 15
+    i32.const 4
+    i32.const 160
+    i32.const 15
+    call $path_link
+    drop))
 """
 
 private let wasiFdRenumberWat = """
