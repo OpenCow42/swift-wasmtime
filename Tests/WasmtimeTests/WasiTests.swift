@@ -190,6 +190,35 @@ import Testing
     #expect(writable == "")
 }
 
+@Test func wasiFdRenumberReplacesDestinationDescriptor() throws {
+    let temporary = testTemporaryDirectory()
+        .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
+    let sandbox = temporary.appendingPathComponent("sandbox", isDirectory: true)
+    let source = sandbox.appendingPathComponent("source.txt")
+    let destination = sandbox.appendingPathComponent("destination.txt")
+    try FileManager.default.createDirectory(at: sandbox, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+
+    let engine = try Engine()
+    let store = try Store(engine: engine)
+    let module = try Module(engine: engine, wat: wasiFdRenumberWat)
+    let wasi = try WasiConfig()
+    try wasi.preopenDirectory(
+        hostPath: sandbox.path,
+        guestPath: "/sandbox",
+        directoryPermissions: [.read, .write],
+        filePermissions: [.read, .write]
+    )
+    try store.setWasi(wasi)
+    let linker = try Linker(engine: engine)
+    try linker.defineWasi()
+    let instance = try linker.instantiate(store: store, module: module)
+
+    #expect(try instance.exportedFunction(named: "_start").call() == [])
+    #expect(try String(contentsOf: source, encoding: .utf8) == "after-renumber\n")
+    #expect(try String(contentsOf: destination, encoding: .utf8) == "")
+}
+
 private func runWasiTruncateAttempt(filePermissions: WasiFilePermissions) throws -> String {
     let temporary = testTemporaryDirectory()
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
@@ -236,4 +265,76 @@ private let wasiTruncateWat = """
     i32.const 48
     call $path_open
     local.set $errno))
+"""
+
+private let wasiFdRenumberWat = """
+(module
+  (import "wasi_snapshot_preview1" "path_open" (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_close" (func $fd_close (param i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_renumber" (func $fd_renumber (param i32 i32) (result i32)))
+  (memory 1)
+  (export "memory" (memory 0))
+  (data (i32.const 64) "source.txt")
+  (data (i32.const 96) "destination.txt")
+  (data (i32.const 160) "after-renumber\\n")
+  (func $assertOk (param $errno i32)
+    local.get $errno
+    i32.eqz
+    if
+    else
+      unreachable
+    end)
+  (func $openWritableFile (param $path i32) (param $length i32) (param $result i32)
+    i32.const 3
+    i32.const 0
+    local.get $path
+    local.get $length
+    i32.const 9
+    i64.const 66
+    i64.const 0
+    i32.const 0
+    local.get $result
+    call $path_open
+    call $assertOk)
+  (func $write (param $fd i32) (param $ptr i32) (param $len i32)
+    i32.const 16
+    local.get $ptr
+    i32.store
+    i32.const 20
+    local.get $len
+    i32.store
+    local.get $fd
+    i32.const 16
+    i32.const 1
+    i32.const 24
+    call $fd_write
+    call $assertOk)
+  (func $close (param $fd i32)
+    local.get $fd
+    call $fd_close
+    call $assertOk)
+  (func (export "_start")
+    i32.const 64
+    i32.const 10
+    i32.const 48
+    call $openWritableFile
+    i32.const 96
+    i32.const 15
+    i32.const 52
+    call $openWritableFile
+    i32.const 48
+    i32.load
+    i32.const 52
+    i32.load
+    call $fd_renumber
+    call $assertOk
+    i32.const 52
+    i32.load
+    i32.const 160
+    i32.const 15
+    call $write
+    i32.const 52
+    i32.load
+    call $close))
 """
