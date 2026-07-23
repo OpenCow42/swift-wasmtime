@@ -55,6 +55,9 @@ public enum TrapCode: Sendable, Equatable, Hashable, CustomStringConvertible {
     case unsupportedCallbackCode
     case cannotResumeThread
     case concurrentFutureStreamOperation
+    case referenceCountOverflow
+    case streamOperationTooBig
+    case waitableSyncAndAsync
     case unknown(UInt8)
 
     public init(rawValue: UInt8) {
@@ -105,6 +108,9 @@ public enum TrapCode: Sendable, Equatable, Hashable, CustomStringConvertible {
         case 43: self = .unsupportedCallbackCode
         case 44: self = .cannotResumeThread
         case 45: self = .concurrentFutureStreamOperation
+        case 46: self = .referenceCountOverflow
+        case 47: self = .streamOperationTooBig
+        case 48: self = .waitableSyncAndAsync
         default: self = .unknown(rawValue)
         }
     }
@@ -157,6 +163,9 @@ public enum TrapCode: Sendable, Equatable, Hashable, CustomStringConvertible {
         case .unsupportedCallbackCode: 43
         case .cannotResumeThread: 44
         case .concurrentFutureStreamOperation: 45
+        case .referenceCountOverflow: 46
+        case .streamOperationTooBig: 47
+        case .waitableSyncAndAsync: 48
         case .unknown(let rawValue): rawValue
         }
     }
@@ -209,6 +218,9 @@ public enum TrapCode: Sendable, Equatable, Hashable, CustomStringConvertible {
         case .unsupportedCallbackCode: "unsupported callback code"
         case .cannotResumeThread: "cannot resume thread"
         case .concurrentFutureStreamOperation: "concurrent future/stream operation"
+        case .referenceCountOverflow: "reference count overflow"
+        case .streamOperationTooBig: "stream operation too big"
+        case .waitableSyncAndAsync: "waitable sync and async"
         case .unknown(let rawValue): "unknown(\(rawValue))"
         }
     }

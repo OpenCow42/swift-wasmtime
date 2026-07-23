@@ -36,6 +36,10 @@ import Testing
     #expect(TrapCode.unknown(255).description == "unknown(255)")
     #expect(TrapCode.integerDivisionByZero.rawValue == 7)
     #expect(TrapCode.integerDivisionByZero.description == "integer division by zero")
+    #expect(TrapCode(rawValue: 46) == .referenceCountOverflow)
+    #expect(TrapCode.referenceCountOverflow.rawValue == 46)
+    #expect(TrapCode.streamOperationTooBig.description == "stream operation too big")
+    #expect(TrapCode.waitableSyncAndAsync.rawValue == UInt8(WASMTIME_TRAP_CODE_WAITABLE_SYNC_AND_ASYNC.rawValue))
     let frame = WasmFrame(
         functionIndex: 3,
         functionOffset: 7,
