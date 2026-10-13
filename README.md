@@ -215,7 +215,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/OpenCow42/swift-wasmtime.git",
-            .upToNextMajor(from: "46.0.1")
+            .upToNextMajor(from: "47.0.0")
         ),
     ],
     targets: [
@@ -333,7 +333,7 @@ try await componentRuntime.call("run", in: componentInstance)
 ## Version Tags
 
 Git release tags use SwiftPM-friendly semantic versions without a leading `v`.
-For example, a package tag like `46.0.1` matches the vendored Wasmtime
+For example, a package tag like `47.0.0` matches the vendored Wasmtime
 `v47.0.0` release. Upstream Wasmtime still uses `v`-prefixed tags, so scripts
 and vendored paths keep the upstream spelling where they interact with
 Bytecode Alliance release assets.
