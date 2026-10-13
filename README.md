@@ -88,7 +88,7 @@ here.
   pre-instantiating modules with `InstancePre` for reuse across compatible
   stores. The remaining low-level extern definition surface for tags is not
   exposed yet.
-- Vendored Wasmtime version: `v47.0.0`, including the upstream WASI
+- Vendored Wasmtime version: `v48.0.5`, including the upstream WASI
   hard-link/rename destination permission fix for
   [GHSA-4ch3-9j33-3pmj](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-4ch3-9j33-3pmj).
 - Vendored platforms: macOS, iOS/iPadOS, and tvOS through
@@ -122,7 +122,7 @@ iPadOS uses the iOS XCFramework slices. tvOS is more provisional than iOS and
 iPadOS: the full test suite passes on the tvOS simulator and the package
 cross-builds for tvOS device targets, but this project has not yet added a
 physical Apple TV, TestFlight, or App Store validation gate. Wasmtime also does
-not publish official iOS or tvOS C API artifacts for `v47.0.0`, so these slices
+not publish official iOS or tvOS C API artifacts for `v48.0.5`, so these slices
 are built from source by this repository's vendoring script. watchOS is not
 supported.
 
@@ -207,7 +207,7 @@ let wasmtimeArch = "x86_64"
 #error("swift-wasmtime currently supports arm64 and x86_64")
 #endif
 
-let wasmtimeVersion = "v47.0.0"
+let wasmtimeVersion = "v48.0.5"
 let wasmtimeLibraryPath = ".build/checkouts/swift-wasmtime/Vendor/Wasmtime/\(wasmtimeVersion)/\(wasmtimeArch)-\(wasmtimeOS)/lib"
 
 let package = Package(
@@ -215,7 +215,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/OpenCow42/swift-wasmtime.git",
-            .upToNextMajor(from: "47.0.0")
+            .upToNextMajor(from: "48.0.5")
         ),
     ],
     targets: [
@@ -333,8 +333,8 @@ try await componentRuntime.call("run", in: componentInstance)
 ## Version Tags
 
 Git release tags use SwiftPM-friendly semantic versions without a leading `v`.
-For example, a package tag like `47.0.0` matches the vendored Wasmtime
-`v47.0.0` release. Upstream Wasmtime still uses `v`-prefixed tags, so scripts
+For example, a package tag like `48.0.5` matches the vendored Wasmtime
+`v48.0.5` release. Upstream Wasmtime still uses `v`-prefixed tags, so scripts
 and vendored paths keep the upstream spelling where they interact with
 Bytecode Alliance release assets.
 
@@ -405,7 +405,7 @@ intentionally triggering a process abort.
 To refresh the vendored C API artifacts:
 
 ```sh
-scripts/vendor-wasmtime.sh v47.0.0
+scripts/vendor-wasmtime.sh v48.0.5
 ```
 
 The script downloads release metadata from GitHub, reads the official asset
@@ -415,11 +415,18 @@ stores platform libraries under `Vendor/Wasmtime`.
 
 On macOS, the script also packages the official `aarch64-macos` and
 `x86_64-macos` release archives into
-`Vendor/Wasmtime/v47.0.0/Wasmtime.xcframework`; it does not keep separate
+`Vendor/Wasmtime/v48.0.5/Wasmtime.xcframework`; it does not keep separate
 vendored macOS library directories outside the XCFramework.
 
-Wasmtime does not publish iOS or tvOS C API archives for `v47.0.0`, so the
+Wasmtime does not publish iOS or tvOS C API archives for `v48.0.5`, so the
 script downloads the matching source release, builds `aarch64-apple-ios`,
 `aarch64-apple-ios-sim`, `x86_64-apple-ios`, `aarch64-apple-tvos`, and
 `aarch64-apple-tvos-sim` static libraries with Xcode and Rust, and adds them to
 the same XCFramework. The iPadOS build uses the iOS XCFramework slices.
+
+## Wasmtime 48 compatibility
+
+Wasmtime 48 uses a single read-only/read-write policy for preopened filesystems.
+Use `WasiFilesystemPermissions` for new code. Representable legacy calls remain
+source-compatible; mixed or unknown directory/file masks fail explicitly without
+granting broader access. See [COMPATIBILITY.md](COMPATIBILITY.md) for migration.

@@ -21,7 +21,7 @@ let wasmtimeArch = "x86_64"
 #error("Wasmtime currently supports arm64 and x86_64")
 #endif
 
-let wasmtimeVersion = "v47.0.0"
+let wasmtimeVersion = "v48.0.5"
 // Link flags are evaluated from the consumer's working directory, not this
 // dependency's directory. Resolve the vendored library from the manifest itself.
 let wasmtimeLibraryPath = URL(fileURLWithPath: #filePath)
