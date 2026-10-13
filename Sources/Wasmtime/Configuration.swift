@@ -24,6 +24,10 @@ public final class Config {
             throw WasmtimeError.allocationFailed("wasm_config_new returned nil")
         }
         self.raw = raw
+        // Preserve the library's v46 defaults when upstream enables proposals.
+        wasmtime_config_wasm_gc_set(raw, false)
+        wasmtime_config_wasm_function_references_set(raw, false)
+        wasmtime_config_wasm_exceptions_set(raw, false)
         try enforcePlatformRuntime()
     }
 
@@ -583,15 +587,8 @@ public final class Engine: @unchecked Sendable {
         ensureWasmtimeRuntimeLibraryIsDiscoverable()
 #endif
 
-#if os(iOS) || os(tvOS)
         let config = try Config()
         try self.init(config: config)
-#else
-        guard let raw = wasm_engine_new() else { // coverage:ignore defensive C allocation failure
-            throw WasmtimeError.allocationFailed("wasm_engine_new returned nil")
-        }
-        self.init(raw: raw)
-#endif
     }
 
     public init(config: Config) throws {
@@ -603,10 +600,6 @@ public final class Engine: @unchecked Sendable {
         guard let raw = wasm_engine_new_with_config(config.release()) else { // coverage:ignore defensive C allocation failure
             throw WasmtimeError.allocationFailed("wasm_engine_new_with_config returned nil")
         }
-        self.raw = raw
-    }
-
-    private init(raw: OpaquePointer) {
         self.raw = raw
     }
 

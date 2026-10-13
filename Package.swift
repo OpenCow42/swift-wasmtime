@@ -1,5 +1,6 @@
 // swift-tools-version: 6.3
 
+import Foundation
 import PackageDescription
 
 #if os(macOS)
@@ -20,8 +21,13 @@ let wasmtimeArch = "x86_64"
 #error("Wasmtime currently supports arm64 and x86_64")
 #endif
 
-let wasmtimeVersion = "v46.0.1"
-let wasmtimeLibraryPath = "Vendor/Wasmtime/\(wasmtimeVersion)/\(wasmtimeArch)-\(wasmtimeOS)/lib"
+let wasmtimeVersion = "v47.0.0"
+// Link flags are evaluated from the consumer's working directory, not this
+// dependency's directory. Resolve the vendored library from the manifest itself.
+let wasmtimeLibraryPath = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()
+    .appendingPathComponent("Vendor/Wasmtime/\(wasmtimeVersion)/\(wasmtimeArch)-\(wasmtimeOS)/lib")
+    .path
 
 let package = Package(
     name: "Wasmtime",

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${1:-v46.0.1}"
+version="${1:-v47.0.0}"
 repo="bytecodealliance/wasmtime"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="${TMPDIR:-/tmp}/swift-wasmtime-vendor-${version}"
@@ -92,6 +92,9 @@ download_verified_asset() {
   expected="$(release_asset_field "$name" digest)"
   expected="${expected#sha256:}"
 
+  if [[ -f "$path" ]] && [[ "$(shasum -a 256 "$path" | awk '{print $1}')" == "$expected" ]]; then
+    return
+  fi
   curl -fL "$url" -o "$path"
   actual="$(shasum -a 256 "$path" | awk '{print $1}')"
   if [[ "$actual" != "$expected" ]]; then
@@ -169,8 +172,13 @@ replacements = {
 
 for relative_path, edits in replacements.items():
     path = root / relative_path
+    # Wasmtime 47 removed this optional vendored dependency.
+    if relative_path.startswith("vendor/iana-time-zone/") and not path.exists():
+        continue
     text = path.read_text(encoding="utf-8")
     for old, new in edits:
+        if old not in text and new in text:
+            continue
         if old not in text:
             raise SystemExit(f"expected source text not found in {relative_path}")
         text = text.replace(old, new)
@@ -208,14 +216,7 @@ for target in "${targets[@]}"; do
   archive_path="${work}/${archive}"
   extract_path="${work}/${target}"
 
-  curl -fL "$url" -o "$archive_path"
-  actual="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
-  if [[ "$actual" != "$expected" ]]; then
-    echo "checksum mismatch for ${archive}" >&2
-    echo "expected: ${expected}" >&2
-    echo "actual:   ${actual}" >&2
-    exit 1
-  fi
+  download_verified_asset "$archive" "$archive_path"
 
   rm -rf "$extract_path"
   mkdir -p "$extract_path"
