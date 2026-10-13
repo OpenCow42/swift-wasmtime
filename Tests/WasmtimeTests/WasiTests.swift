@@ -73,6 +73,46 @@ import Testing
     try store.setWasi(try options.makeConfig())
 }
 
+@Test func wasiNativeFilesystemModesMapIntoReusableOptions() throws {
+    let temporary = testTemporaryDirectory().appendingPathComponent("swift-wasmtime-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    for mode in [WasiFilesystemPermissions.readOnly, .readWrite] {
+        acceptsSendable(mode)
+        let preopen = WasiPreopenedDirectory(
+            hostPath: temporary.path, guestPath: "/sandbox", filesystemPermissions: mode
+        )
+        #expect(preopen.directoryPermissions == (mode == .readWrite ? [.read, .write] : [.read]))
+        #expect(preopen.filePermissions == (mode == .readWrite ? [.read, .write] : [.read]))
+        let options = WasiOptions(preopenedDirectories: [preopen])
+        let engine = try Engine()
+        let store = try Store(engine: engine)
+        try store.setWasi(try options.makeConfig())
+    }
+}
+
+@Test func wasiLegacyUnrepresentableMasksFailBeforeGrantingAccess() throws {
+    let config = try WasiConfig()
+    for directoryMask in 0...4 {
+        for fileMask in 0...4 {
+            if (directoryMask == 1 && fileMask == 1) || (directoryMask == 3 && fileMask == 3) {
+                continue
+            }
+            try expectSpecificError(.wasiConfigurationFailed(
+                "Wasmtime 48 supports whole-filesystem read-only or read-write preopens, " +
+                "not independent directory/file permissions. Use filesystemPermissions; " +
+                "the requested legacy permissions were not granted."
+            )) {
+                try config.preopenDirectory(
+                    hostPath: "/definitely/not/here", guestPath: "/denied",
+                    directoryPermissions: .init(rawValue: directoryMask),
+                    filePermissions: .init(rawValue: fileMask)
+                )
+            }
+        }
+    }
+}
+
 @Test func wasiPreopenedDirectoryGrantsReadAccess() throws {
     let temporary = testTemporaryDirectory()
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
@@ -182,23 +222,33 @@ import Testing
     #expect(try String(contentsOf: stdout, encoding: .utf8) == "preopen-ok\n")
 }
 
-@Test func wasiPathOpenTruncateRequiresWriteFilePermissions() throws {
-    let readOnly = try runWasiTruncateAttempt(filePermissions: [.read])
+@Test func wasiPathOpenTruncateRequiresReadWriteFilesystemPermissions() throws {
+    let readOnly = try runWasiTruncateAttempt(filesystemPermissions: .readOnly)
     #expect(readOnly == "preserve")
 
-    let writable = try runWasiTruncateAttempt(filePermissions: [.read, .write])
+    let writable = try runWasiTruncateAttempt(filesystemPermissions: .readWrite)
     #expect(writable == "")
 }
 
-@Test func wasiPathRenameAndLinkRespectDestinationFilePermissions() throws {
-    let mismatched = try runWasiDestinationMutationAttempt(
+@Test func wasiPathRenameAndLinkRespectReadOnlyFilesystemPolicy() throws {
+    // The old mixed policy is rejected before installation rather than silently
+    // granting writes. Keep the mutation regression for the supported policy.
+    #expect(throws: WasmtimeError.self) {
+        try runWasiDestinationMutationAttempt(
+            sourceFilePermissions: [.read],
+            destinationFilePermissions: [.read, .write]
+        )
+    }
+
+    let readOnly = try runWasiDestinationMutationAttempt(
         sourceFilePermissions: [.read],
-        destinationFilePermissions: [.read, .write]
+        destinationFilePermissions: [.read, .write],
+        sourceDirectoryPermissions: [.read]
     )
-    #expect(mismatched.renameSourceExists)
-    #expect(!mismatched.renameTargetExists)
-    #expect(mismatched.linkSourceExists)
-    #expect(!mismatched.linkTargetExists)
+    #expect(readOnly.renameSourceExists)
+    #expect(!readOnly.renameTargetExists)
+    #expect(readOnly.linkSourceExists)
+    #expect(!readOnly.linkTargetExists)
 
     let matched = try runWasiDestinationMutationAttempt(
         sourceFilePermissions: [.read, .write],
@@ -239,7 +289,7 @@ import Testing
     #expect(try String(contentsOf: destination, encoding: .utf8) == "")
 }
 
-private func runWasiTruncateAttempt(filePermissions: WasiFilePermissions) throws -> String {
+private func runWasiTruncateAttempt(filesystemPermissions: WasiFilesystemPermissions) throws -> String {
     let temporary = testTemporaryDirectory()
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
     let sandbox = temporary.appendingPathComponent("sandbox", isDirectory: true)
@@ -255,8 +305,7 @@ private func runWasiTruncateAttempt(filePermissions: WasiFilePermissions) throws
     try wasi.preopenDirectory(
         hostPath: sandbox.path,
         guestPath: "/sandbox",
-        directoryPermissions: [.read, .write],
-        filePermissions: filePermissions
+        filesystemPermissions: filesystemPermissions
     )
     try store.setWasi(wasi)
     let linker = try Linker(engine: engine)
@@ -278,7 +327,8 @@ private struct WasiDestinationMutationResult {
 
 private func runWasiDestinationMutationAttempt(
     sourceFilePermissions: WasiFilePermissions,
-    destinationFilePermissions: WasiFilePermissions
+    destinationFilePermissions: WasiFilePermissions,
+    sourceDirectoryPermissions: WasiDirectoryPermissions = [.read, .write]
 ) throws -> WasiDestinationMutationResult {
     let temporary = testTemporaryDirectory()
         .appendingPathComponent("swift-wasmtime-\(UUID().uuidString)", isDirectory: true)
@@ -301,7 +351,7 @@ private func runWasiDestinationMutationAttempt(
     try wasi.preopenDirectory(
         hostPath: sourceDirectory.path,
         guestPath: "/source",
-        directoryPermissions: [.read, .write],
+        directoryPermissions: sourceDirectoryPermissions,
         filePermissions: sourceFilePermissions
     )
     try wasi.preopenDirectory(

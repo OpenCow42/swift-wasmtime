@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${1:-v47.0.0}"
+version="${1:-v48.0.5}"
 repo="bytecodealliance/wasmtime"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="${TMPDIR:-/tmp}/swift-wasmtime-vendor-${version}"
@@ -177,6 +177,12 @@ for relative_path, edits in replacements.items():
         continue
     text = path.read_text(encoding="utf-8")
     for old, new in edits:
+        # Wasmtime 48 changed this cfg_if branch to a cfg_select arm.
+        if relative_path.endswith("/traphandlers.rs") and old not in text:
+            arm_old = '    target_vendor = "apple" => {\n'
+            arm_new = '    any(target_os = "macos", target_os = "ios") => {\n'
+            if arm_old in text or arm_new in text:
+                old, new = arm_old, arm_new
         if old not in text and new in text:
             continue
         if old not in text:

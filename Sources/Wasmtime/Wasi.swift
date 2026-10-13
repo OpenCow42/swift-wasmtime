@@ -115,11 +115,38 @@ public final class WasiConfig {
         }
     }
 
+    /// Legacy mask adapter. Wasmtime 48 accepts only read/read or full/full.
+    /// Other pairs throw before access is granted; use the explicit filesystem policy.
     public func preopenDirectory(
         hostPath: String,
         guestPath: String,
         directoryPermissions: WasiDirectoryPermissions = [.read],
         filePermissions: WasiFilePermissions = [.read]
+    ) throws {
+        let permissions: WasiFilesystemPermissions
+        switch (directoryPermissions.rawValue, filePermissions.rawValue) {
+        case (1, 1):
+            permissions = .readOnly
+        case (3, 3):
+            permissions = .readWrite
+        default:
+            throw WasmtimeError.wasiConfigurationFailed(
+                "Wasmtime 48 supports whole-filesystem read-only or read-write preopens, " +
+                "not independent directory/file permissions. Use filesystemPermissions; " +
+                "the requested legacy permissions were not granted."
+            )
+        }
+        try preopenDirectory(hostPath: hostPath, guestPath: guestPath, filesystemPermissions: permissions)
+    }
+
+    /// Grants explicitly scoped access to a directory and its descendants.
+    ///
+    /// Wasmtime 48 applies one filesystem permission policy to both directories
+    /// and files. Read-only is the safe equivalent of the legacy read/read policy.
+    public func preopenDirectory(
+        hostPath: String,
+        guestPath: String,
+        filesystemPermissions: WasiFilesystemPermissions
     ) throws {
         try hostPath.withCString { cHostPath in
             try guestPath.withCString { cGuestPath in
@@ -127,8 +154,7 @@ public final class WasiConfig {
                     requiredRaw,
                     cHostPath,
                     cGuestPath,
-                    directoryPermissions.rawValue,
-                    filePermissions.rawValue
+                    filesystemPermissions == .readWrite
                 ) else {
                     throw WasmtimeError.wasiConfigurationFailed(
                         "could not preopen WASI directory: \(hostPath) as \(guestPath)"
@@ -299,6 +325,28 @@ public struct WasiPreopenedDirectory: Sendable, Equatable {
         self.directoryPermissions = directoryPermissions
         self.filePermissions = filePermissions
     }
+
+    /// Creates a preopen using Wasmtime 48's native filesystem policy.
+    public init(
+        hostPath: String,
+        guestPath: String,
+        filesystemPermissions: WasiFilesystemPermissions
+    ) {
+        self.init(
+            hostPath: hostPath,
+            guestPath: guestPath,
+            directoryPermissions: filesystemPermissions == .readWrite ? [.read, .write] : [.read],
+            filePermissions: filesystemPermissions == .readWrite ? [.read, .write] : [.read]
+        )
+    }
+}
+
+/// Permissions applied to a preopened directory and every reachable file.
+public enum WasiFilesystemPermissions: Sendable, Hashable {
+    /// Allows reads and metadata queries; rejects filesystem mutations.
+    case readOnly
+    /// Allows reads and filesystem mutations within the preopened directory.
+    case readWrite
 }
 
 /// Directory-level permissions for a WASI preopened directory.
@@ -309,8 +357,8 @@ public struct WasiDirectoryPermissions: OptionSet, Sendable, Hashable {
         self.rawValue = rawValue
     }
 
-    public static let read = Self(rawValue: Int(WASMTIME_WASI_DIR_PERMS_READ.rawValue))
-    public static let write = Self(rawValue: Int(WASMTIME_WASI_DIR_PERMS_WRITE.rawValue))
+    public static let read = Self(rawValue: 1)
+    public static let write = Self(rawValue: 2)
 }
 
 /// File-level permissions for files inside a WASI preopened directory.
@@ -321,8 +369,8 @@ public struct WasiFilePermissions: OptionSet, Sendable, Hashable {
         self.rawValue = rawValue
     }
 
-    public static let read = Self(rawValue: Int(WASMTIME_WASI_FILE_PERMS_READ.rawValue))
-    public static let write = Self(rawValue: Int(WASMTIME_WASI_FILE_PERMS_WRITE.rawValue))
+    public static let read = Self(rawValue: 1)
+    public static let write = Self(rawValue: 2)
 }
 
 private func withCStringArray<T>(_ strings: [String], _ body: (UnsafeMutableBufferPointer<UnsafePointer<CChar>?>) throws -> T) rethrows -> T {
