@@ -39,7 +39,7 @@ private func vendoredWasmtimeLibraryDirectory() -> String {
         packageRoot = FileManager.default.currentDirectoryPath
     }
 
-    return packageRoot + "\\Vendor\\Wasmtime\\v46.0.1\\" + wasmtimeVendorPlatform + "\\lib"
+    return packageRoot + "\\Vendor\\Wasmtime\\v47.0.0\\" + wasmtimeVendorPlatform + "\\lib"
 }
 
 private var wasmtimeVendorPlatform: String {

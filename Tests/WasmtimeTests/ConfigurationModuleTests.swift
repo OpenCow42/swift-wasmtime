@@ -68,6 +68,25 @@ import Testing
 #endif
 }
 
+@Test func upstreamUpgradePreservesDisabledProposalDefaults() throws {
+    let engines = [try Engine(), try Engine(config: Config()), try Engine(options: EngineOptions())]
+    for engine in engines {
+        #expect(throws: WasmtimeError.self) {
+            _ = try Module(engine: engine, wat: "(module (type (struct (field i32))))")
+        }
+        #expect(throws: WasmtimeError.self) {
+            _ = try Module(engine: engine, wat: "(module (tag (param i32)))")
+        }
+    }
+    // Existing opt-in capabilities remain available; this adds no public API.
+    let config = try Config()
+    config.isFunctionReferencesEnabled = true
+    config.isWasmGCEnabled = true
+    config.areExceptionsEnabled = true
+    let enabled = try Engine(config: config)
+    _ = try Module(engine: enabled, wat: "(module (type (struct (field i32))) (tag (param i32)))")
+}
+
 @Test func compilesWatWasmBytesAndData() throws {
     let engine = try Engine()
     let wasm = try WasmText.compile("(module)")
