@@ -7,12 +7,12 @@ the Bytecode Alliance Wasmtime project.
 
 - Project: Wasmtime
 - Upstream repository: https://github.com/bytecodealliance/wasmtime
-- Vendored version: v48.0.5
+- Vendored version: v50.0.1
 - Vendored paths:
   - `Sources/CWasmtime/include`
-  - `Vendor/Wasmtime/v48.0.5`
+  - `Vendor/Wasmtime/v50.0.1`
 - License: Apache-2.0 WITH LLVM-exception
-- Upstream license: https://github.com/bytecodealliance/wasmtime/blob/v48.0.5/LICENSE
+- Upstream license: https://github.com/bytecodealliance/wasmtime/blob/v50.0.1/LICENSE
 
 The Wasmtime license text is the same license text used by this package and is
 included in `LICENSE`.
