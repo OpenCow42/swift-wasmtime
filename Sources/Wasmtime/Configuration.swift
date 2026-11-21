@@ -275,6 +275,10 @@ public final class Config {
 #if os(iOS) || os(tvOS)
         try setTarget("pulley64")
 #endif
+#if os(tvOS)
+        // tvOS does not support Wasmtime's alternate signal stack.
+        signalsBasedTraps = false
+#endif
     }
 
     private var requiredRaw: OpaquePointer {
