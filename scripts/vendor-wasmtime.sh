@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${1:-v50.0.1}"
+version="${1:-v51.0.0}"
 repo="bytecodealliance/wasmtime"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="${TMPDIR:-/tmp}/swift-wasmtime-vendor-${version}"
@@ -108,7 +108,7 @@ download_verified_asset() {
 patch_apple_mobile_source() {
   local source_path="$1"
 
-  python3 - "$source_path" <<'PY'
+  python3 - "$source_path" "$version" <<'PY'
 import hashlib
 import json
 import sys
@@ -169,6 +169,16 @@ replacements = {
         ),
     ],
 }
+
+if sys.argv[2] == "v51.0.0":
+    # tvOS forbids sigaltstack. Use Wasmtime's non-signal trap path on tvOS;
+    # the Swift wrapper already forces Pulley on this platform.
+    replacements["crates/wasmtime/build.rs"] = [
+        (
+            "let has_native_signals = !miri\n",
+            "let has_native_signals = !miri\n        && !cfg_is(\"target_os\", \"tvos\")\n",
+        ),
+    ]
 
 for relative_path, edits in replacements.items():
     path = root / relative_path
